@@ -261,6 +261,248 @@
   renderers.hotspot = renderStub;
   renderers.branch = renderStub;
 
+  /* ------------------------------------------------------------------
+     Knowledge check (§6.1)
+
+     Real radio and checkbox inputs. Every option carries its own
+     feedback, correct ones included. Answers persist, retries are
+     unlimited, and nothing here is scored except the final check.
+     ------------------------------------------------------------------ */
+
+  function checkState(id) {
+    if (!state.answers[id]) { state.answers[id] = { checked: false, picks: {} }; }
+    return state.answers[id];
+  }
+
+  function isQuestionCorrect(question, picked) {
+    var correct = question.options.filter(function (o) { return o.correct; })
+      .map(function (o) { return o.id; }).sort();
+    var chosen = (picked || []).slice().sort();
+    return correct.length === chosen.length && correct.every(function (id, i) { return id === chosen[i]; });
+  }
+
+  function questionVerdict(question, picked) {
+    if (!picked || !picked.length) { return "none"; }
+    if (isQuestionCorrect(question, picked)) { return "correct"; }
+    var anyRight = picked.some(function (id) {
+      return question.options.some(function (o) { return o.id === id && o.correct; });
+    });
+    return (question.multi && anyRight) ? "partial" : "incorrect";
+  }
+
+  function feedbackItem(option, verdictClass, tag) {
+    var item = el("div", "feedback__item feedback__item--" + verdictClass);
+    var status = el("p", "feedback__status");
+    var glyph = icon(verdictClass === "correct" ? "tick" : "cross");
+    glyph.setAttribute("class", "feedback__icon feedback__icon--" + verdictClass);
+    status.appendChild(glyph);
+    status.appendChild(document.createTextNode(tag));
+    item.appendChild(status);
+    item.appendChild(el("p", "feedback__option", option.text));
+    item.appendChild(richInto(el("p", "feedback__why"), option.feedback));
+    return item;
+  }
+
+  function renderQuestionFeedback(region, question, picked) {
+    clear(region);
+    var verdict = questionVerdict(question, picked);
+    if (verdict === "none") {
+      region.appendChild(el("p", "feedback__why", COURSE.ui.notAnsweredLabel));
+      return verdict;
+    }
+
+    var headline = verdict === "correct" ? COURSE.ui.correctLabel
+      : (verdict === "partial" ? COURSE.ui.partialLabel : COURSE.ui.incorrectLabel);
+    var summary = el("p", "feedback__status");
+    var glyph = icon(verdict === "correct" ? "tick" : "cross");
+    glyph.setAttribute("class", "feedback__icon feedback__icon--" + (verdict === "correct" ? "correct" : "incorrect"));
+    summary.appendChild(glyph);
+    summary.appendChild(document.createTextNode(headline));
+    region.appendChild(summary);
+
+    /* What the student chose, with the reason for each choice. */
+    picked.forEach(function (id) {
+      var option = question.options.filter(function (o) { return o.id === id; })[0];
+      if (!option) { return; }
+      region.appendChild(feedbackItem(option, option.correct ? "correct" : "incorrect",
+        option.correct ? COURSE.ui.youChoseRight : COURSE.ui.youChoseWrong));
+    });
+
+    /* When the answer is not fully right, the correct options and their
+       reasons are shown too, so the question teaches rather than marks. */
+    if (verdict !== "correct") {
+      question.options.forEach(function (option) {
+        if (!option.correct) { return; }
+        if (picked.indexOf(option.id) !== -1) { return; }
+        region.appendChild(feedbackItem(option, "correct", COURSE.ui.missedRight));
+      });
+    }
+    return verdict;
+  }
+
+  renderers.check = function (block) {
+    var saved = checkState(block.id);
+    var section = el("section", "block check");
+    section.setAttribute("aria-labelledby", "check-" + block.id + "-title");
+    if (block.scored) { section.id = "final-check-anchor"; section.tabIndex = -1; }
+
+    var title = el("h3", "check__title", block.title || COURSE.ui.checkDefaultTitle);
+    title.id = "check-" + block.id + "-title";
+    section.appendChild(title);
+    if (block.intro) { section.appendChild(richInto(el("p"), block.intro)); }
+
+    var scoreRegion = el("div", "check__score");
+    scoreRegion.setAttribute("aria-live", "polite");
+    if (block.scored) { section.appendChild(scoreRegion); }
+
+    var regions = {};
+
+    block.questions.forEach(function (question, qIndex) {
+      var group = el("fieldset", "question");
+      var legend = el("legend", "question__prompt");
+      legend.appendChild(document.createTextNode((qIndex + 1) + ". "));
+      legend.appendChild(rich(question.prompt));
+      group.appendChild(legend);
+      group.appendChild(el("p", "question__hint",
+        question.multi ? COURSE.ui.multiHint : COURSE.ui.singleHint));
+
+      var list = el("ul", "options");
+      var name = "q-" + block.id + "-" + question.id;
+
+      question.options.forEach(function (option) {
+        var li = el("li");
+        var label = el("label", "option");
+        var input = document.createElement("input");
+        input.type = question.multi ? "checkbox" : "radio";
+        input.name = name;
+        input.value = option.id;
+        input.className = "option__input";
+        input.checked = (saved.picks[question.id] || []).indexOf(option.id) !== -1;
+        if (input.checked) { label.classList.add("option--chosen"); }
+
+        input.addEventListener("change", function () {
+          var picks = Array.prototype.slice
+            .call(list.querySelectorAll("input:checked"))
+            .map(function (i) { return i.value; });
+          saved.picks[question.id] = picks;
+          save();
+          Array.prototype.slice.call(list.querySelectorAll(".option")).forEach(function (l) {
+            var box = l.querySelector("input");
+            l.classList.toggle("option--chosen", !!(box && box.checked));
+          });
+          if (saved.checked) { showAll(); }
+        });
+
+        label.appendChild(input);
+        label.appendChild(richInto(el("span", "option__text"), option.text));
+        li.appendChild(label);
+        list.appendChild(li);
+      });
+
+      group.appendChild(list);
+
+      var region = el("div", "feedback");
+      region.setAttribute("aria-live", "polite");
+      regions[question.id] = region;
+      group.appendChild(region);
+
+      section.appendChild(group);
+    });
+
+    function showAll() {
+      var correctCount = 0;
+      var answered = 0;
+      block.questions.forEach(function (question) {
+        var picked = saved.picks[question.id] || [];
+        if (picked.length) { answered++; }
+        var verdict = renderQuestionFeedback(regions[question.id], question, picked);
+        if (verdict === "correct") { correctCount++; }
+      });
+      if (block.scored) { renderScore(correctCount, answered); }
+    }
+
+    function clearAll() {
+      saved.checked = false;
+      saved.picks = {};
+      save();
+      Array.prototype.slice.call(section.querySelectorAll("input")).forEach(function (input) {
+        input.checked = false;
+      });
+      Array.prototype.slice.call(section.querySelectorAll(".option")).forEach(function (label) {
+        label.classList.remove("option--chosen");
+      });
+      Object.keys(regions).forEach(function (id) { clear(regions[id]); });
+      clear(scoreRegion);
+      if (block.scored) {
+        state.finalScore = null;
+        save();
+        renderRecord();
+      }
+    }
+
+    function renderScore(correctCount, answered) {
+      clear(scoreRegion);
+      var total = block.questions.length;
+      var pass = correctCount >= (block.passMark || total);
+
+      if (answered < total) {
+        scoreRegion.appendChild(el("p", "score__headline",
+          COURSE.ui.answerAllLabel.replace("{n}", String(total - answered))));
+        state.finalScore = null;
+        save();
+        renderRecord();
+        return;
+      }
+
+      var panel = el("div", "score");
+      var headline = el("p", "score__headline");
+      var glyph = icon(pass ? "tick" : "cross");
+      glyph.setAttribute("class", "feedback__icon feedback__icon--" + (pass ? "correct" : "incorrect"));
+      headline.appendChild(glyph);
+      headline.appendChild(document.createTextNode(
+        COURSE.ui.scoreYouGot + " " + correctCount + " " + COURSE.ui.scoreOutOf.replace("{total}", String(total))));
+      panel.appendChild(headline);
+      panel.appendChild(el("p", null, pass ? COURSE.ui.passedLabel : COURSE.ui.failedLabel));
+      scoreRegion.appendChild(panel);
+
+      state.finalScore = { correct: correctCount, total: total, passed: pass };
+      save();
+      renderRecord();
+    }
+
+    var row = el("div", "btn-row");
+    var checkBtn = el("button", "btn", COURSE.ui.checkAnswersLabel);
+    checkBtn.type = "button";
+    checkBtn.addEventListener("click", function () {
+      saved.checked = true;
+      save();
+      showAll();
+    });
+    var clearBtn = el("button", "btn btn--secondary",
+      block.scored ? COURSE.ui.retryFinalLabel : COURSE.ui.tryAgainLabel);
+    clearBtn.type = "button";
+    clearBtn.addEventListener("click", clearAll);
+    row.appendChild(checkBtn);
+    row.appendChild(clearBtn);
+    section.appendChild(row);
+
+    if (store.available) {
+      section.appendChild(el("p", "check__saved", COURSE.ui.savedLabel));
+    }
+
+    if (saved.checked) {
+      /* Restore the feedback the student had last time, after this
+         section has been placed in the document. */
+      window.setTimeout(showAll, 0);
+    }
+
+    return section;
+  };
+
+  /* Replaced in the completion-record section below. Declared here so
+     the final check can call it before that section is reached. */
+  var renderRecord = function () {};
+
   /* --- INTERACTIONS --- */
 
   function renderBlock(block, module) {

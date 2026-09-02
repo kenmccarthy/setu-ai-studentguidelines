@@ -549,3 +549,10 @@ main:focus { outline: none; }
   .record__title { break-after: avoid; page-break-after: avoid; }
   a { text-decoration: none; }
 }
+
+/* ---------- 23. Fieldset reset for question groups ---------- */
+.question {
+  border: 0; padding: 0; margin: 0 0 2.25rem; min-width: 0;
+}
+.question__prompt { padding: 0; }
+.check__score { max-width: var(--measure); }
