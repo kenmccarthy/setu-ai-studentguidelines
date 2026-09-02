@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A self-paced course on the SETU student guidelines for using generative AI in your studies.">
+<meta name="robots" content="noindex">
+<title>Using Gen AI at SETU</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<a class="skip-link" id="skip-link" href="#main"></a>
+
+<header class="site-header">
+  <div class="wrap site-header__inner">
+    <!-- [[CONFIRM: SETU logo asset files (master, reverse, mono) from SETU marketing.
+         Until they are supplied this is a labelled placeholder of the correct minimum
+         height (60px) with brand clearance around it. Do not draw or trace the crest. -->
+    <div class="logo-slot">
+      <div class="logo-slot__box" id="logo-box" role="img">
+        <span class="logo-slot__label" id="logo-label"></span>
+      </div>
+    </div>
+    <div class="site-header__titles">
+      <p class="site-header__org" id="course-org"></p>
+      <h1 class="site-header__title" id="course-title"></h1>
+      <p class="site-header__sub" id="course-subtitle"></p>
+    </div>
+  </div>
+</header>
+
+<div class="site-progress" id="site-progress" hidden>
+  <div class="wrap site-progress__inner">
+    <div class="site-progress__meta">
+      <span class="site-progress__label" id="progress-label"></span>
+      <span class="site-progress__count" id="progress-count"></span>
+    </div>
+    <div class="site-progress__track">
+      <div class="site-progress__fill" id="progress-fill"></div>
+    </div>
+    <div class="visually-hidden" aria-live="polite" id="progress-announce"></div>
+  </div>
+</div>
+
+<div class="wrap layout">
+
+  <nav class="contents" id="contents" aria-labelledby="contents-heading">
+    <div class="contents__head">
+      <h2 class="contents__heading" id="contents-heading"></h2>
+      <button type="button" class="contents__toggle" id="contents-toggle" aria-expanded="false" aria-controls="contents-list"></button>
+    </div>
+    <ol class="contents__list" id="contents-list"></ol>
+  </nav>
+
+  <main id="main" tabindex="-1">
+    <div id="resume-slot"></div>
+    <article id="module-root" class="module"></article>
+    <nav class="module-nav" id="module-nav" aria-label="Move between modules"></nav>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="wrap site-footer__inner">
+    <p class="site-footer__privacy" id="footer-privacy"></p>
+    <p class="site-footer__review" id="footer-review"></p>
+    <details class="confirms" id="confirms">
+      <summary class="confirms__summary" id="confirms-summary"></summary>
+      <ul class="confirms__list" id="confirms-list"></ul>
+    </details>
+    <p class="site-footer__actions">
+      <button type="button" class="btn btn--quiet" id="reset-all"></button>
+    </p>
+    <p class="site-footer__status" role="status" id="footer-status"></p>
+  </div>
+</footer>
+
+<noscript>
+  <p class="noscript">This course needs JavaScript to run. It still sends nothing anywhere &mdash; everything happens in this browser.</p>
+</noscript>
+
+<script src="content.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

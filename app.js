@@ -1,0 +1,1698 @@
+/* =====================================================================
+   app.js — rendering, interaction, state and progress.
+
+   No course copy lives here. Every string a student reads comes from
+   content.js. This file only decides how those strings are put on screen.
+
+   Nothing in here makes a network request. State is held in localStorage
+   under the "setu-genai-course:" namespace, and every access is wrapped
+   so that private browsing degrades to a working, non-persistent course.
+   ===================================================================== */
+(function () {
+  "use strict";
+
+  var NS = "setu-genai-course:";
+  var STATE_KEY = NS + "state";
+
+  /* ------------------------------------------------------------------
+     1. Storage. Never throws. `available` is false when the browser
+        refuses us, and the course runs identically without it.
+     ------------------------------------------------------------------ */
+  var store = {
+    available: (function () {
+      try {
+        var probe = NS + "probe";
+        window.localStorage.setItem(probe, "1");
+        window.localStorage.removeItem(probe);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    })(),
+    read: function (key) {
+      try { return window.localStorage.getItem(key); } catch (e) { return null; }
+    },
+    write: function (key, value) {
+      try { window.localStorage.setItem(key, value); return true; } catch (e) { return false; }
+    },
+    clearNamespace: function () {
+      try {
+        var doomed = [];
+        for (var i = 0; i < window.localStorage.length; i++) {
+          var k = window.localStorage.key(i);
+          if (k && k.indexOf(NS) === 0) { doomed.push(k); }
+        }
+        doomed.forEach(function (k) { window.localStorage.removeItem(k); });
+        return true;
+      } catch (e) { return false; }
+    }
+  };
+
+  /* ------------------------------------------------------------------
+     2. State
+     ------------------------------------------------------------------ */
+  function blankState() {
+    return {
+      current: 0,
+      completed: {},     /* moduleId  -> true                                */
+      answers: {},       /* checkId   -> { checked: bool, picks: {qid:[ids]} } */
+      sorts: {},         /* sortId    -> { checked: bool, placed: {cardId:bucketId} } */
+      sliders: {},       /* sliderId  -> stop index                          */
+      reflections: {},   /* reflectId + "/" + promptId -> text               */
+      builders: {},      /* builderId -> field values                        */
+      finalScore: null,  /* { correct, total, passed }                       */
+      completedAt: null, /* ISO date the final check was first passed        */
+      recordName: ""
+    };
+  }
+
+  var state = blankState();
+
+  function loadState() {
+    var raw = store.read(STATE_KEY);
+    if (!raw) { return; }
+    try {
+      var parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        var fresh = blankState();
+        Object.keys(fresh).forEach(function (k) {
+          if (Object.prototype.hasOwnProperty.call(parsed, k)) { fresh[k] = parsed[k]; }
+        });
+        state = fresh;
+      }
+    } catch (e) {
+      console.warn("Saved progress could not be read and has been ignored.", e);
+    }
+  }
+
+  function save() {
+    try { store.write(STATE_KEY, JSON.stringify(state)); } catch (e) { /* nothing to do */ }
+  }
+
+  /* ------------------------------------------------------------------
+     3. Small DOM helpers
+     ------------------------------------------------------------------ */
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) { node.className = className; }
+    if (text !== undefined && text !== null) { node.textContent = text; }
+    return node;
+  }
+
+  function clear(node) {
+    while (node.firstChild) { node.removeChild(node.firstChild); }
+  }
+
+  function byId(id) { return document.getElementById(id); }
+
+  /* Inline markup in content.js is limited to <strong>, <em> and <a>
+     (§4). Anything else is reduced to its text. Attributes are dropped
+     apart from href on a link. */
+  var ALLOWED_INLINE = { STRONG: 1, EM: 1, A: 1 };
+
+  function sanitiseInto(source, target) {
+    Array.prototype.slice.call(source.childNodes).forEach(function (node) {
+      if (node.nodeType === 3) {
+        markConfirms(node.nodeValue, target);
+        return;
+      }
+      if (node.nodeType !== 1) { return; }
+      if (ALLOWED_INLINE[node.nodeName] === 1) {
+        var kept = document.createElement(node.nodeName.toLowerCase());
+        if (node.nodeName === "A") {
+          var href = node.getAttribute("href") || "";
+          if (/^(https?:|mailto:|#)/i.test(href)) { kept.setAttribute("href", href); }
+          if (/^https?:/i.test(href)) {
+            kept.setAttribute("rel", "noopener noreferrer");
+          }
+        }
+        sanitiseInto(node, kept);
+        target.appendChild(kept);
+      } else {
+        console.warn("content.js: <" + node.nodeName.toLowerCase() + "> is not allowed in course text and was reduced to plain text.");
+        sanitiseInto(node, target);
+      }
+    });
+  }
+
+  /* [[CONFIRM: ...]] markers are shown on the page rather than hidden,
+     so a reviewer can see what is still outstanding (§13). */
+  var CONFIRM_PATTERN = /\[\[CONFIRM:[\s\S]*?\]\]/g;
+
+  function markConfirms(text, target) {
+    var last = 0;
+    var match;
+    CONFIRM_PATTERN.lastIndex = 0;
+    while ((match = CONFIRM_PATTERN.exec(text)) !== null) {
+      if (match.index > last) {
+        target.appendChild(document.createTextNode(text.slice(last, match.index)));
+      }
+      target.appendChild(el("span", "confirm-marker", match[0]));
+      last = match.index + match[0].length;
+    }
+    if (last < text.length) {
+      target.appendChild(document.createTextNode(text.slice(last)));
+    }
+  }
+
+  /* Returns a fragment of safe inline content for a string from content.js. */
+  function rich(str) {
+    var frag = document.createDocumentFragment();
+    var holder = document.createElement("template");
+    holder.innerHTML = String(str === undefined || str === null ? "" : str);
+    sanitiseInto(holder.content, frag);
+    return frag;
+  }
+
+  function richInto(node, str) {
+    node.appendChild(rich(str));
+    return node;
+  }
+
+  /* Fills {placeholders} in a template string from content.js. */
+  function fill(template, values) {
+    return String(template).replace(/\{(\w+)\}/g, function (whole, key) {
+      return Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : whole;
+    });
+  }
+
+  function icon(name) {
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 20 20");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    /* A tick and a cross: correctness is carried by shape and by the
+       word beside it, not by colour (§8). */
+    path.setAttribute("d", name === "tick"
+      ? "M2.5 10.8 L7.4 15.6 L17.5 4.9"
+      : "M4.2 4.2 L15.8 15.8 M15.8 4.2 L4.2 15.8");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "2.6");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(path);
+    return svg;
+  }
+
+  /* ------------------------------------------------------------------
+     4. Block renderers. Registered by `type`; an unknown type renders
+        nothing and warns (§4).
+     ------------------------------------------------------------------ */
+  var renderers = {};
+
+  renderers.prose = function (block) {
+    var wrap = el("div", "block block--prose");
+    if (block.heading) {
+      wrap.appendChild(richInto(el("h3", "block__heading"), block.heading));
+    }
+    (block.paragraphs || []).forEach(function (p) {
+      wrap.appendChild(richInto(el("p"), p));
+    });
+    return wrap;
+  };
+
+  renderers.list = function (block) {
+    var wrap = el("div", "block block--list");
+    if (block.heading) {
+      wrap.appendChild(richInto(el("h3", "block__heading"), block.heading));
+    }
+    if (block.lead) {
+      wrap.appendChild(richInto(el("p", "block__lead"), block.lead));
+    }
+    var list = el(block.ordered ? "ol" : "ul");
+    (block.items || []).forEach(function (item) {
+      list.appendChild(richInto(el("li"), item));
+    });
+    wrap.appendChild(list);
+    return wrap;
+  };
+
+  renderers.callout = function (block) {
+    var tone = block.tone === "warning" || block.tone === "quote" ? block.tone : "note";
+    var wrap = el("aside", "block callout callout--" + tone);
+    if (block.title) {
+      wrap.appendChild(richInto(el("h3", "callout__title"), block.title));
+    }
+    (block.paragraphs || []).forEach(function (p) {
+      wrap.appendChild(richInto(el("p"), p));
+    });
+    if (block.items && block.items.length) {
+      var list = el(block.ordered ? "ol" : "ul");
+      block.items.forEach(function (item) {
+        list.appendChild(richInto(el("li"), item));
+      });
+      wrap.appendChild(list);
+    }
+    if (block.attribution) {
+      wrap.appendChild(richInto(el("p", "callout__attribution"), block.attribution));
+    }
+    return wrap;
+  };
+
+  /* hotspot and branch are deferred to v2. They render their stub copy
+     and an HTML comment, and are deliberately not partially built. */
+  function renderStub(block) {
+    var wrap = el("div", "block stub");
+    var stub = block.stub || {};
+    wrap.appendChild(document.createComment(" v2: " + (stub.v2 || block.type) + " "));
+    wrap.appendChild(el("p", "stub__flag", COURSE.ui.stubFlag));
+    if (stub.heading) {
+      wrap.appendChild(richInto(el("h3", "stub__heading"), stub.heading));
+    }
+    (stub.paragraphs || []).forEach(function (p) {
+      wrap.appendChild(richInto(el("p"), p));
+    });
+    return wrap;
+  }
+  renderers.hotspot = renderStub;
+  renderers.branch = renderStub;
+
+  /* ------------------------------------------------------------------
+     Knowledge check (§6.1)
+
+     Real radio and checkbox inputs. Every option carries its own
+     feedback, correct ones included. Answers persist, retries are
+     unlimited, and nothing here is scored except the final check.
+     ------------------------------------------------------------------ */
+
+  function checkState(id) {
+    if (!state.answers[id]) { state.answers[id] = { checked: false, picks: {} }; }
+    return state.answers[id];
+  }
+
+  function isQuestionCorrect(question, picked) {
+    var correct = question.options.filter(function (o) { return o.correct; })
+      .map(function (o) { return o.id; }).sort();
+    var chosen = (picked || []).slice().sort();
+    return correct.length === chosen.length && correct.every(function (id, i) { return id === chosen[i]; });
+  }
+
+  function questionVerdict(question, picked) {
+    if (!picked || !picked.length) { return "none"; }
+    if (isQuestionCorrect(question, picked)) { return "correct"; }
+    var anyRight = picked.some(function (id) {
+      return question.options.some(function (o) { return o.id === id && o.correct; });
+    });
+    return (question.multi && anyRight) ? "partial" : "incorrect";
+  }
+
+  function feedbackItem(option, verdictClass, tag) {
+    var item = el("div", "feedback__item feedback__item--" + verdictClass);
+    var status = el("p", "feedback__status");
+    var glyph = icon(verdictClass === "correct" ? "tick" : "cross");
+    glyph.setAttribute("class", "feedback__icon feedback__icon--" + verdictClass);
+    status.appendChild(glyph);
+    status.appendChild(document.createTextNode(tag));
+    item.appendChild(status);
+    item.appendChild(el("p", "feedback__option", option.text));
+    item.appendChild(richInto(el("p", "feedback__why"), option.feedback));
+    return item;
+  }
+
+  function renderQuestionFeedback(region, question, picked) {
+    clear(region);
+    var verdict = questionVerdict(question, picked);
+    if (verdict === "none") {
+      region.appendChild(el("p", "feedback__why", COURSE.ui.notAnsweredLabel));
+      return verdict;
+    }
+
+    var headline = verdict === "correct" ? COURSE.ui.correctLabel
+      : (verdict === "partial" ? COURSE.ui.partialLabel : COURSE.ui.incorrectLabel);
+    var summary = el("p", "feedback__status");
+    var glyph = icon(verdict === "correct" ? "tick" : "cross");
+    glyph.setAttribute("class", "feedback__icon feedback__icon--" + (verdict === "correct" ? "correct" : "incorrect"));
+    summary.appendChild(glyph);
+    summary.appendChild(document.createTextNode(headline));
+    region.appendChild(summary);
+
+    /* What the student chose, with the reason for each choice. */
+    picked.forEach(function (id) {
+      var option = question.options.filter(function (o) { return o.id === id; })[0];
+      if (!option) { return; }
+      region.appendChild(feedbackItem(option, option.correct ? "correct" : "incorrect",
+        option.correct ? COURSE.ui.youChoseRight : COURSE.ui.youChoseWrong));
+    });
+
+    /* When the answer is not fully right, the correct options and their
+       reasons are shown too, so the question teaches rather than marks. */
+    if (verdict !== "correct") {
+      question.options.forEach(function (option) {
+        if (!option.correct) { return; }
+        if (picked.indexOf(option.id) !== -1) { return; }
+        region.appendChild(feedbackItem(option, "correct", COURSE.ui.missedRight));
+      });
+    }
+    return verdict;
+  }
+
+  renderers.check = function (block) {
+    var saved = checkState(block.id);
+    var section = el("section", "block check");
+    section.setAttribute("aria-labelledby", "check-" + block.id + "-title");
+    if (block.scored) { section.id = "final-check-anchor"; section.tabIndex = -1; }
+
+    var title = el("h3", "check__title", block.title || COURSE.ui.checkDefaultTitle);
+    title.id = "check-" + block.id + "-title";
+    section.appendChild(title);
+    if (block.intro) { section.appendChild(richInto(el("p"), block.intro)); }
+
+    var scoreRegion = el("div", "check__score");
+    scoreRegion.setAttribute("aria-live", "polite");
+    if (block.scored) { section.appendChild(scoreRegion); }
+
+    var regions = {};
+
+    block.questions.forEach(function (question, qIndex) {
+      var group = el("fieldset", "question");
+      var legend = el("legend", "question__prompt");
+      legend.appendChild(document.createTextNode((qIndex + 1) + ". "));
+      legend.appendChild(rich(question.prompt));
+      group.appendChild(legend);
+      group.appendChild(el("p", "question__hint",
+        question.multi ? COURSE.ui.multiHint : COURSE.ui.singleHint));
+
+      var list = el("ul", "options");
+      var name = "q-" + block.id + "-" + question.id;
+
+      question.options.forEach(function (option) {
+        var li = el("li");
+        var label = el("label", "option");
+        var input = document.createElement("input");
+        input.type = question.multi ? "checkbox" : "radio";
+        input.name = name;
+        input.value = option.id;
+        input.className = "option__input";
+        input.checked = (saved.picks[question.id] || []).indexOf(option.id) !== -1;
+        if (input.checked) { label.classList.add("option--chosen"); }
+
+        input.addEventListener("change", function () {
+          var picks = Array.prototype.slice
+            .call(list.querySelectorAll("input:checked"))
+            .map(function (i) { return i.value; });
+          saved.picks[question.id] = picks;
+          save();
+          Array.prototype.slice.call(list.querySelectorAll(".option")).forEach(function (l) {
+            var box = l.querySelector("input");
+            l.classList.toggle("option--chosen", !!(box && box.checked));
+          });
+          if (saved.checked) { showAll(); }
+        });
+
+        label.appendChild(input);
+        label.appendChild(richInto(el("span", "option__text"), option.text));
+        li.appendChild(label);
+        list.appendChild(li);
+      });
+
+      group.appendChild(list);
+
+      var region = el("div", "feedback");
+      region.setAttribute("aria-live", "polite");
+      regions[question.id] = region;
+      group.appendChild(region);
+
+      section.appendChild(group);
+    });
+
+    function showAll() {
+      var correctCount = 0;
+      var answered = 0;
+      block.questions.forEach(function (question) {
+        var picked = saved.picks[question.id] || [];
+        if (picked.length) { answered++; }
+        var verdict = renderQuestionFeedback(regions[question.id], question, picked);
+        if (verdict === "correct") { correctCount++; }
+      });
+      if (block.scored) { renderScore(correctCount, answered); }
+    }
+
+    function clearAll() {
+      saved.checked = false;
+      saved.picks = {};
+      save();
+      Array.prototype.slice.call(section.querySelectorAll("input")).forEach(function (input) {
+        input.checked = false;
+      });
+      Array.prototype.slice.call(section.querySelectorAll(".option")).forEach(function (label) {
+        label.classList.remove("option--chosen");
+      });
+      Object.keys(regions).forEach(function (id) { clear(regions[id]); });
+      clear(scoreRegion);
+      if (block.scored) {
+        state.finalScore = null;
+        state.completedAt = null;
+        save();
+        renderRecord();
+      }
+    }
+
+    function renderScore(correctCount, answered) {
+      clear(scoreRegion);
+      var total = block.questions.length;
+      var pass = correctCount >= (block.passMark || total);
+
+      if (answered < total) {
+        scoreRegion.appendChild(el("p", "score__headline",
+          COURSE.ui.answerAllLabel.replace("{n}", String(total - answered))));
+        state.finalScore = null;
+        save();
+        renderRecord();
+        return;
+      }
+
+      var panel = el("div", "score");
+      var headline = el("p", "score__headline");
+      var glyph = icon(pass ? "tick" : "cross");
+      glyph.setAttribute("class", "feedback__icon feedback__icon--" + (pass ? "correct" : "incorrect"));
+      headline.appendChild(glyph);
+      headline.appendChild(document.createTextNode(
+        COURSE.ui.scoreYouGot + " " + correctCount + " " + COURSE.ui.scoreOutOf.replace("{total}", String(total))));
+      panel.appendChild(headline);
+      panel.appendChild(el("p", null, pass ? COURSE.ui.passedLabel : COURSE.ui.failedLabel));
+      scoreRegion.appendChild(panel);
+
+      state.finalScore = { correct: correctCount, total: total, passed: pass };
+      if (pass && !state.completedAt) { state.completedAt = new Date().toISOString(); }
+      save();
+      renderRecord();
+    }
+
+    var row = el("div", "btn-row");
+    var checkBtn = el("button", "btn", COURSE.ui.checkAnswersLabel);
+    checkBtn.type = "button";
+    checkBtn.addEventListener("click", function () {
+      saved.checked = true;
+      save();
+      showAll();
+    });
+    var clearBtn = el("button", "btn btn--secondary",
+      block.scored ? COURSE.ui.retryFinalLabel : COURSE.ui.tryAgainLabel);
+    clearBtn.type = "button";
+    clearBtn.addEventListener("click", clearAll);
+    row.appendChild(checkBtn);
+    row.appendChild(clearBtn);
+    section.appendChild(row);
+
+    if (store.available) {
+      section.appendChild(el("p", "check__saved", COURSE.ui.savedLabel));
+    }
+
+    if (saved.checked) {
+      /* Restore the feedback the student had last time, after this
+         section has been placed in the document. */
+      window.setTimeout(showAll, 0);
+    }
+
+    return section;
+  };
+
+  /* Replaced in the completion-record section below. Declared here so
+     the final check can call it before that section is reached. */
+  var renderRecord = function () {};
+
+  /* ------------------------------------------------------------------
+     Card sort (§6.2) — "Is this allowed?"
+
+     Click-to-place, never drag-only. Select a card and choose a column,
+     or move between cards with the arrow keys and place the focused card
+     with 1, 2 or 3. Pointer users get the same two steps. There is no
+     drag path in v1: the spec allows one to be layered on top later, and
+     a half-built one would be worse than none.
+     ------------------------------------------------------------------ */
+
+  function sortState(id) {
+    if (!state.sorts[id]) { state.sorts[id] = { checked: false, placed: {} }; }
+    return state.sorts[id];
+  }
+
+  renderers.sort = function (block) {
+    var saved = sortState(block.id);
+    var selected = null;
+
+    var section = el("section", "block sort");
+    section.setAttribute("aria-labelledby", "sort-" + block.id + "-title");
+    var title = el("h3", "check__title", block.title);
+    title.id = "sort-" + block.id + "-title";
+    section.appendChild(title);
+    if (block.intro) { section.appendChild(richInto(el("p", "sort__intro"), block.intro)); }
+
+    var status = el("p", "sort__status");
+    status.setAttribute("aria-live", "polite");
+    section.appendChild(status);
+
+    var poolHeading = el("h4", "sort__pool-heading", COURSE.ui.unplacedLabel);
+    section.appendChild(poolHeading);
+    var pool = el("ul", "sort__pool");
+    pool.setAttribute("aria-labelledby", "sort-" + block.id + "-pool");
+    poolHeading.id = "sort-" + block.id + "-pool";
+    section.appendChild(pool);
+
+    var columns = el("div", "sort__columns");
+    section.appendChild(columns);
+
+    var summary = el("div", "sort__summary");
+    summary.setAttribute("aria-live", "polite");
+    summary.hidden = true;
+    section.appendChild(summary);
+
+    function cardById(id) {
+      return block.cards.filter(function (c) { return c.id === id; })[0];
+    }
+    function bucketById(id) {
+      return block.buckets.filter(function (b) { return b.id === id; })[0];
+    }
+    function unplaced() {
+      return block.cards.filter(function (c) { return !saved.placed[c.id]; });
+    }
+
+    function announce(message) { status.textContent = message; }
+
+    function place(cardId, bucketId) {
+      saved.placed[cardId] = bucketId;
+      selected = null;
+      save();
+      draw();
+      announce(COURSE.ui.placedAnnounce
+        .replace("{card}", cardById(cardId).text)
+        .replace("{bucket}", bucketById(bucketId).label));
+      focusFirstCard();
+    }
+
+    function unplace(cardId) {
+      delete saved.placed[cardId];
+      save();
+      draw();
+      announce(COURSE.ui.returnedAnnounce.replace("{card}", cardById(cardId).text));
+      focusFirstCard();
+    }
+
+    function focusFirstCard() {
+      var first = pool.querySelector(".card");
+      if (first) { first.focus(); }
+    }
+
+    function moveFocus(current, delta) {
+      var cards = Array.prototype.slice.call(pool.querySelectorAll(".card"));
+      var i = cards.indexOf(current);
+      if (i === -1) { return; }
+      var next = cards[(i + delta + cards.length) % cards.length];
+      if (next) { next.focus(); }
+    }
+
+    function drawPool() {
+      clear(pool);
+      var remaining = unplaced();
+
+      if (!remaining.length) {
+        var done = el("li");
+        done.appendChild(el("p", "bucket__empty",
+          saved.checked ? COURSE.ui.allCheckedLabel : COURSE.ui.allPlacedLabel));
+        pool.appendChild(done);
+        poolHeading.textContent = COURSE.ui.unplacedLabel + " (0)";
+        return;
+      }
+      poolHeading.textContent = COURSE.ui.unplacedLabel + " (" + remaining.length + ")";
+
+      remaining.forEach(function (card) {
+        var li = el("li");
+
+        if (saved.checked) {
+          /* After checking, an unplaced card still shows its explanation
+             and where it belonged. Every card explains itself (§6.2). */
+          var missed = el("div", "placed placed--wrong");
+          var mark = el("div", "placed__mark");
+          var glyph = icon("cross");
+          glyph.setAttribute("class", "feedback__icon feedback__icon--incorrect");
+          mark.appendChild(glyph);
+          mark.appendChild(document.createTextNode(
+            COURSE.ui.notPlacedLabel.replace("{bucket}", bucketById(card.correctBucket).label)));
+          missed.appendChild(mark);
+          missed.appendChild(el("p", "placed__text", card.text));
+          missed.appendChild(richInto(el("p", "placed__explain"), card.explain));
+          li.appendChild(missed);
+          pool.appendChild(li);
+          return;
+        }
+
+        var button = el("button", "card");
+        button.type = "button";
+        button.setAttribute("aria-pressed", selected === card.id ? "true" : "false");
+        if (selected === card.id) {
+          button.appendChild(el("span", "card__selected", COURSE.ui.selectedLabel));
+        }
+        button.appendChild(document.createTextNode(card.text));
+
+        button.addEventListener("click", function () {
+          selected = (selected === card.id) ? null : card.id;
+          draw();
+          var again = pool.querySelector('.card[aria-pressed="true"]');
+          if (again) { again.focus(); } else { focusFirstCard(); }
+          announce(selected ? COURSE.ui.selectedAnnounce.replace("{card}", card.text) : COURSE.ui.deselectedAnnounce);
+        });
+
+        button.addEventListener("keydown", function (event) {
+          if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+            event.preventDefault(); moveFocus(button, 1);
+          } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+            event.preventDefault(); moveFocus(button, -1);
+          } else if (event.key === "1" || event.key === "2" || event.key === "3") {
+            var bucket = block.buckets[Number(event.key) - 1];
+            if (bucket) { event.preventDefault(); place(card.id, bucket.id); }
+          }
+        });
+
+        li.appendChild(button);
+        pool.appendChild(li);
+      });
+    }
+
+    function drawColumns() {
+      clear(columns);
+      block.buckets.forEach(function (bucket, index) {
+        var column = el("div", "bucket");
+        column.appendChild(el("h4", "bucket__title", (index + 1) + ". " + bucket.label));
+        column.appendChild(el("p", "bucket__hint", bucket.hint));
+
+        if (!saved.checked) {
+          var placeBtn = el("button", "btn btn--secondary bucket__place",
+            COURSE.ui.placeInLabel + " " + bucket.label);
+          placeBtn.type = "button";
+          placeBtn.addEventListener("click", function () {
+            if (!selected) { announce(COURSE.ui.selectFirstLabel); return; }
+            place(selected, bucket.id);
+          });
+          column.appendChild(placeBtn);
+        }
+
+        var list = el("ul", "bucket__list");
+        var mine = block.cards.filter(function (c) { return saved.placed[c.id] === bucket.id; });
+
+        if (!mine.length) {
+          column.appendChild(el("p", "bucket__empty", COURSE.ui.emptyBucketLabel));
+        }
+
+        mine.forEach(function (card) {
+          var li = el("li");
+          var right = card.correctBucket === bucket.id;
+          var item = el("div", "placed" + (saved.checked ? (right ? " placed--right" : " placed--wrong") : ""));
+
+          if (saved.checked) {
+            var mark = el("div", "placed__mark");
+            var glyph = icon(right ? "tick" : "cross");
+            glyph.setAttribute("class", "feedback__icon feedback__icon--" + (right ? "correct" : "incorrect"));
+            mark.appendChild(glyph);
+            mark.appendChild(document.createTextNode(right
+              ? COURSE.ui.correctLabel
+              : COURSE.ui.belongsInLabel.replace("{bucket}", bucketById(card.correctBucket).label)));
+            item.appendChild(mark);
+          }
+
+          item.appendChild(el("p", "placed__text", card.text));
+
+          if (saved.checked) {
+            item.appendChild(richInto(el("p", "placed__explain"), card.explain));
+          } else {
+            var back = el("button", "btn btn--quiet placed__remove", COURSE.ui.moveBackLabel);
+            back.type = "button";
+            back.addEventListener("click", function () { unplace(card.id); });
+            item.appendChild(back);
+          }
+
+          li.appendChild(item);
+          list.appendChild(li);
+        });
+
+        column.appendChild(list);
+        columns.appendChild(column);
+      });
+    }
+
+    function drawSummary() {
+      clear(summary);
+      summary.hidden = !saved.checked;
+      if (!saved.checked) { return; }
+      var right = block.cards.filter(function (c) {
+        return saved.placed[c.id] === c.correctBucket;
+      }).length;
+      summary.appendChild(el("p", "score__headline",
+        COURSE.ui.sortScoreLabel
+          .replace("{right}", String(right))
+          .replace("{total}", String(block.cards.length))));
+      summary.appendChild(richInto(el("p"), block.summary));
+    }
+
+    function draw() {
+      drawPool();
+      drawColumns();
+      drawSummary();
+      drawButtons();
+    }
+
+    var buttonRow = el("div", "btn-row");
+    section.appendChild(buttonRow);
+
+    function drawButtons() {
+      clear(buttonRow);
+      if (!saved.checked) {
+        var checkBtn = el("button", "btn", COURSE.ui.checkSortLabel);
+        checkBtn.type = "button";
+        checkBtn.addEventListener("click", function () {
+          saved.checked = true;
+          selected = null;
+          save();
+          draw();
+          summary.focus && summary.focus();
+        });
+        buttonRow.appendChild(checkBtn);
+      }
+      var resetBtn = el("button", "btn btn--secondary", COURSE.ui.resetSortLabel);
+      resetBtn.type = "button";
+      resetBtn.addEventListener("click", function () {
+        saved.checked = false;
+        saved.placed = {};
+        selected = null;
+        save();
+        draw();
+        announce(COURSE.ui.sortResetLabel);
+        focusFirstCard();
+      });
+      buttonRow.appendChild(resetBtn);
+    }
+
+    draw();
+    return section;
+  };
+
+  /* ------------------------------------------------------------------
+     Permission spectrum (§6.3)
+
+     A native range input, so the keyboard behaviour is the browser's.
+     aria-valuetext carries the stop label rather than the number, and
+     the panel that swaps sits in a polite live region.
+     ------------------------------------------------------------------ */
+  renderers.slider = function (block) {
+    var section = el("section", "block slider");
+    section.setAttribute("aria-labelledby", "slider-" + block.id + "-title");
+    var title = el("h3", "check__title", block.title);
+    title.id = "slider-" + block.id + "-title";
+    section.appendChild(title);
+    if (block.intro) { section.appendChild(richInto(el("p"), block.intro)); }
+
+    var index = Math.min(Math.max(parseInt(state.sliders[block.id], 10) || 0, 0), block.stops.length - 1);
+
+    var track = el("div", "slider__track");
+    var label = el("label", "field__label", COURSE.ui.spectrumLabel);
+    label.setAttribute("for", "slider-" + block.id);
+    track.appendChild(label);
+
+    var input = document.createElement("input");
+    input.type = "range";
+    input.className = "slider__input";
+    input.id = "slider-" + block.id;
+    input.min = "0";
+    input.max = String(block.stops.length - 1);
+    input.step = "1";
+    input.value = String(index);
+    track.appendChild(input);
+
+    var marks = el("ol", "slider__marks");
+    block.stops.forEach(function (stop) {
+      var mark = el("li", "slider__mark");
+      mark.appendChild(el("span", null, stop.label));
+      marks.appendChild(mark);
+    });
+    track.appendChild(marks);
+    section.appendChild(track);
+
+    var panel = el("div", "stop");
+    panel.setAttribute("aria-live", "polite");
+    section.appendChild(panel);
+
+    function drawStop() {
+      var stop = block.stops[index];
+      input.setAttribute("aria-valuetext", stop.label);
+
+      Array.prototype.slice.call(marks.children).forEach(function (mark, i) {
+        mark.classList.toggle("slider__mark--on", i === index);
+      });
+
+      clear(panel);
+      panel.appendChild(el("h4", "stop__title", (index + 1) + ". " + stop.label));
+      panel.appendChild(richInto(el("p", "stop__sub"), stop.sub));
+
+      panel.appendChild(el("p", "stop__label", COURSE.ui.mayLabel));
+      var list = el("ul");
+      stop.may.forEach(function (item) { list.appendChild(richInto(el("li"), item)); });
+      panel.appendChild(list);
+
+      panel.appendChild(el("p", "stop__label", COURSE.ui.declareLabel));
+      panel.appendChild(richInto(el("p"), stop.declare));
+
+      panel.appendChild(el("p", "stop__label", COURSE.ui.unsureLabel));
+      panel.appendChild(richInto(el("p"), stop.unsure));
+    }
+
+    input.addEventListener("input", function () {
+      index = Math.min(Math.max(parseInt(input.value, 10) || 0, 0), block.stops.length - 1);
+      state.sliders[block.id] = index;
+      save();
+      drawStop();
+    });
+
+    drawStop();
+    section.appendChild(richInto(el("p", "slider__closing"), block.closing));
+    return section;
+  };
+
+  /* ------------------------------------------------------------------
+     Declaration builder (§6.4)
+
+     Produces copy-and-paste declaration text in two switchable styles.
+     The text is always visible in a textarea, so copying is never the
+     only route out. Nothing typed here leaves the browser.
+     ------------------------------------------------------------------ */
+
+  function joinList(items) {
+    var kept = items.filter(function (t) { return t; });
+    if (!kept.length) { return ""; }
+    if (kept.length === 1) { return kept[0]; }
+    /* Several of the purposes in content.js already contain "and"
+       ("editing and proofreading"), and a second "and" reads badly, so
+       those lists stay comma-separated. */
+    var hasAnd = kept.some(function (t) { return / and /.test(t); });
+    if (hasAnd) { return kept.join(", "); }
+    return kept.slice(0, -1).join(", ") + " and " + kept[kept.length - 1];
+  }
+
+  function builderState(block) {
+    if (!state.builders[block.id]) {
+      state.builders[block.id] = {
+        tools: [""],
+        builtIn: false,
+        dates: "",
+        year: "",
+        purposes: {},
+        otherPurpose: "",
+        name: "",
+        moduleCode: "",
+        assignment: "",
+        prompt: "",
+        format: block.formats[0].id
+      };
+    }
+    return state.builders[block.id];
+  }
+
+  function declarationText(block, data) {
+    var f = block.fields;
+    var tools = data.tools.filter(function (t) { return t.trim(); });
+    var toolList = tools.length ? tools : [f.toolsEmpty];
+    var t = block.templates;
+    var dates = data.dates.trim() || t.emptyDates;
+    var year = data.year.trim() || t.emptyYear;
+    var name = data.name.trim() || t.emptyName;
+
+    var purposes = block.purposes
+      .filter(function (p) { return data.purposes[p.id] && p.id !== "other"; })
+      .map(function (p) { return p.text; });
+    if (data.purposes.other && data.otherPurpose.trim()) { purposes.push(data.otherPurpose.trim()); }
+    var purposeText = purposes.length ? joinList(purposes) : t.emptyPurposes;
+
+    if (data.format === "reference") {
+      /* [Tool name and version]. [Year]. Response to [Name], [date]. */
+      var lines = toolList.map(function (tool) {
+        return fill(t.reference, { tool: tool, year: year, name: name, dates: dates });
+      });
+      if (data.builtIn) { lines.push(COURSE.ui.builtInReferenceNote); }
+      return lines.join("\n");
+    }
+
+    var head = [];
+    if (data.name.trim()) { head.push(COURSE.ui.declName + ": " + data.name.trim()); }
+    if (data.moduleCode.trim()) { head.push(COURSE.ui.declModule + ": " + data.moduleCode.trim()); }
+    if (data.assignment.trim()) { head.push(COURSE.ui.declAssignment + ": " + data.assignment.trim()); }
+
+    var what = data.assignment.trim()
+      ? fill(t.whatNamed, { assignment: data.assignment.trim() })
+      : t.whatUnnamed;
+    var sentence = fill(t.sentence, {
+      tools: joinList(toolList),
+      dates: dates,
+      purposes: purposeText,
+      builtIn: data.builtIn ? t.builtInClause : "",
+      what: what
+    });
+
+    var body = [COURSE.ui.declarationHeading];
+    if (head.length) { body.push(head.join("\n")); }
+    body.push(sentence);
+    if (data.prompt.trim()) {
+      body.push(COURSE.ui.promptUsedLabel + "\n\"" + data.prompt.trim() + "\"");
+    }
+    return body.join("\n\n");
+  }
+
+  function textField(labelText, value, placeholder, onChange, type) {
+    var wrap = el("div", "field");
+    var input = document.createElement(type === "textarea" ? "textarea" : "input");
+    input.className = type === "textarea" ? "field__textarea" : "field__input";
+    if (type !== "textarea") { input.type = "text"; }
+    input.value = value || "";
+    if (placeholder) { input.placeholder = placeholder; }
+    var id = "f-" + Math.random().toString(36).slice(2, 9);
+    input.id = id;
+    var label = el("label", "field__label", labelText);
+    label.setAttribute("for", id);
+    wrap.appendChild(label);
+    wrap.appendChild(input);
+    input.addEventListener("input", function () { onChange(input.value); });
+    return { wrap: wrap, input: input };
+  }
+
+  renderers.builder = function (block) {
+    var data = builderState(block);
+    var f = block.fields;
+
+    var section = el("section", "block builder");
+    section.setAttribute("aria-labelledby", "builder-" + block.id + "-title");
+    var title = el("h3", "check__title", block.title);
+    title.id = "builder-" + block.id + "-title";
+    section.appendChild(title);
+    if (block.intro) { section.appendChild(richInto(el("p"), block.intro)); }
+
+    var output, status;
+
+    function refresh() {
+      save();
+      if (output) { output.value = declarationText(block, data); }
+    }
+
+    /* --- tools, repeatable --- */
+    var toolsWrap = el("div", "field");
+    toolsWrap.appendChild(el("p", "field__label", f.toolsLabel));
+    var toolRows = el("div");
+    toolsWrap.appendChild(toolRows);
+
+    function drawTools() {
+      clear(toolRows);
+      data.tools.forEach(function (value, i) {
+        var row = el("div", "tool-row");
+        var input = document.createElement("input");
+        input.type = "text";
+        input.className = "field__input";
+        input.value = value;
+        input.placeholder = f.toolsPlaceholder;
+        input.setAttribute("aria-label", f.toolsLabel + " " + (i + 1));
+        input.addEventListener("input", function () { data.tools[i] = input.value; refresh(); });
+        row.appendChild(input);
+        if (data.tools.length > 1) {
+          var remove = el("button", "btn btn--quiet", f.removeToolLabel);
+          remove.type = "button";
+          remove.addEventListener("click", function () {
+            data.tools.splice(i, 1);
+            refresh();
+            drawTools();
+            var first = toolRows.querySelector("input");
+            if (first) { first.focus(); }
+          });
+          row.appendChild(remove);
+        }
+        toolRows.appendChild(row);
+      });
+      var add = el("button", "btn btn--secondary", f.addToolLabel);
+      add.type = "button";
+      add.addEventListener("click", function () {
+        data.tools.push("");
+        refresh();
+        drawTools();
+        var inputs = toolRows.querySelectorAll("input");
+        if (inputs.length) { inputs[inputs.length - 1].focus(); }
+      });
+      toolRows.appendChild(add);
+    }
+    drawTools();
+    section.appendChild(toolsWrap);
+
+    /* --- built-in tools --- */
+    var builtInWrap = el("div", "field");
+    var builtInLabel = el("label", "checkline");
+    var builtInBox = document.createElement("input");
+    builtInBox.type = "checkbox";
+    builtInBox.checked = !!data.builtIn;
+    builtInBox.addEventListener("change", function () { data.builtIn = builtInBox.checked; refresh(); });
+    builtInLabel.appendChild(builtInBox);
+    builtInLabel.appendChild(document.createTextNode(f.builtInLabel));
+    builtInWrap.appendChild(builtInLabel);
+    section.appendChild(builtInWrap);
+
+    /* --- dates and year --- */
+    var dates = textField(f.datesLabel, data.dates, f.datesPlaceholder, function (v) { data.dates = v; refresh(); });
+    section.appendChild(dates.wrap);
+    var year = textField(f.yearLabel, data.year, "2026", function (v) { data.year = v; refresh(); });
+    section.appendChild(year.wrap);
+
+    /* --- purposes --- */
+    var purposesGroup = el("fieldset", "field question");
+    purposesGroup.appendChild(el("legend", "field__label", f.purposesLabel));
+    var purposeList = el("ul", "checks");
+    block.purposes.forEach(function (purpose) {
+      var li = el("li");
+      var line = el("label", "checkline");
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = !!data.purposes[purpose.id];
+      box.addEventListener("change", function () {
+        data.purposes[purpose.id] = box.checked;
+        refresh();
+        otherWrap.hidden = !data.purposes.other;
+      });
+      line.appendChild(box);
+      line.appendChild(document.createTextNode(purpose.text));
+      li.appendChild(line);
+      purposeList.appendChild(li);
+    });
+    purposesGroup.appendChild(purposeList);
+    var other = textField(f.purposesOtherLabel, data.otherPurpose, "", function (v) { data.otherPurpose = v; refresh(); });
+    var otherWrap = other.wrap;
+    otherWrap.hidden = !data.purposes.other;
+    purposesGroup.appendChild(otherWrap);
+    section.appendChild(purposesGroup);
+
+    /* --- identification --- */
+    section.appendChild(textField(f.nameLabel, data.name, f.namePlaceholder, function (v) { data.name = v; refresh(); }).wrap);
+    section.appendChild(textField(f.moduleLabel, data.moduleCode, f.modulePlaceholder, function (v) { data.moduleCode = v; refresh(); }).wrap);
+    section.appendChild(textField(f.assignmentLabel, data.assignment, f.assignmentPlaceholder, function (v) { data.assignment = v; refresh(); }).wrap);
+    section.appendChild(textField(f.promptLabel, data.prompt, f.promptPlaceholder, function (v) { data.prompt = v; refresh(); }, "textarea").wrap);
+
+    /* --- output style --- */
+    var formatGroup = el("fieldset", "field question");
+    formatGroup.appendChild(el("legend", "field__label", f.formatLabel));
+    var formatRow = el("div", "builder__formats");
+    block.formats.forEach(function (format) {
+      var line = el("label", "checkline");
+      var radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "format-" + block.id;
+      radio.value = format.id;
+      radio.checked = data.format === format.id;
+      radio.addEventListener("change", function () {
+        if (!radio.checked) { return; }
+        data.format = format.id;
+        refresh();
+        hint.textContent = format.hint;
+      });
+      line.appendChild(radio);
+      line.appendChild(document.createTextNode(format.label));
+      formatRow.appendChild(line);
+    });
+    formatGroup.appendChild(formatRow);
+    var chosen = block.formats.filter(function (x) { return x.id === data.format; })[0] || block.formats[0];
+    var hint = el("p", "builder__hint", chosen.hint);
+    formatGroup.appendChild(hint);
+    section.appendChild(formatGroup);
+
+    /* --- output --- */
+    var outWrap = el("div", "field");
+    var outLabel = el("label", "field__label", f.outputLabel);
+    outLabel.setAttribute("for", "builder-out-" + block.id);
+    output = document.createElement("textarea");
+    output.className = "field__textarea";
+    output.id = "builder-out-" + block.id;
+    output.rows = 8;
+    output.spellcheck = false;
+    output.readOnly = true;
+    output.value = declarationText(block, data);
+    outWrap.appendChild(outLabel);
+    outWrap.appendChild(output);
+    section.appendChild(outWrap);
+
+    var row = el("div", "btn-row");
+    var copy = el("button", "btn", f.copyLabel);
+    copy.type = "button";
+    copy.addEventListener("click", function () {
+      var text = output.value;
+      function fallback() {
+        try {
+          output.readOnly = false;
+          output.focus();
+          output.setSelectionRange(0, text.length);
+          var ok = document.execCommand && document.execCommand("copy");
+          output.readOnly = true;
+          status.textContent = ok ? f.copiedLabel : f.copyFailedLabel;
+        } catch (e) {
+          output.readOnly = true;
+          status.textContent = f.copyFailedLabel;
+        }
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () {
+          status.textContent = f.copiedLabel;
+        }, fallback);
+      } else {
+        fallback();
+      }
+    });
+    row.appendChild(copy);
+    section.appendChild(row);
+
+    status = el("p", "builder__status");
+    status.setAttribute("aria-live", "polite");
+    section.appendChild(status);
+
+    section.appendChild(richInto(el("p", "builder__note"), block.note));
+    return section;
+  };
+
+  /* ------------------------------------------------------------------
+     Reflection (§6.5)
+
+     Free text, saved locally, surfaced in the completion record. Not
+     submitted and not marked, and the label says so.
+     ------------------------------------------------------------------ */
+  renderers.reflect = function (block) {
+    var section = el("section", "block reflect");
+    section.setAttribute("aria-labelledby", "reflect-" + block.id + "-title");
+    var title = el("h3", "check__title", block.title);
+    title.id = "reflect-" + block.id + "-title";
+    section.appendChild(title);
+    section.appendChild(richInto(el("p", "reflect__note"), block.note));
+
+    var status = el("p", "reflect__status");
+    status.setAttribute("aria-live", "polite");
+
+    block.prompts.forEach(function (prompt) {
+      var key = block.id + "/" + prompt.id;
+      var field = textField(prompt.label, state.reflections[key] || "", prompt.placeholder, function (value) {
+        state.reflections[key] = value;
+        save();
+        status.textContent = store.available ? COURSE.ui.savedLabel : COURSE.ui.notSavedLabel;
+      }, "textarea");
+      section.appendChild(field.wrap);
+    });
+
+    section.appendChild(status);
+    return section;
+  };
+
+  /* ------------------------------------------------------------------
+     Completion record (§5)
+
+     Generated on the page once the final check is passed. A record the
+     student can keep, not an award: no certificate graphics and no
+     confetti. Printing it uses the print stylesheet, which leaves
+     nothing else on the page.
+     ------------------------------------------------------------------ */
+
+  function formatToday(iso) {
+    var date = iso ? new Date(iso) : new Date();
+    if (isNaN(date.getTime())) { date = new Date(); }
+    try {
+      return date.toLocaleDateString("en-IE", { day: "numeric", month: "long", year: "numeric" });
+    } catch (e) {
+      return date.toISOString().slice(0, 10);
+    }
+  }
+
+  function collectReflections() {
+    var out = [];
+    COURSE.modules.forEach(function (module) {
+      (module.blocks || []).forEach(function (block) {
+        if (block.type !== "reflect") { return; }
+        (block.prompts || []).forEach(function (prompt) {
+          var key = block.id + "/" + prompt.id;
+          out.push({
+            module: module.number + ". " + module.title,
+            label: prompt.label,
+            answer: (state.reflections[key] || "").trim()
+          });
+        });
+      });
+    });
+    return out;
+  }
+
+  function collectDeclaration() {
+    var text = "";
+    COURSE.modules.forEach(function (module) {
+      (module.blocks || []).forEach(function (block) {
+        if (block.type !== "builder") { return; }
+        var data = state.builders[block.id];
+        if (!data) { return; }
+        var touched = data.tools.some(function (t) { return t.trim(); }) ||
+          data.dates.trim() || data.name.trim() || data.assignment.trim() ||
+          Object.keys(data.purposes).some(function (k) { return data.purposes[k]; });
+        if (touched) { text = declarationText(block, data); }
+      });
+    });
+    return text;
+  }
+
+  renderRecord = function () {
+    var slot = byId("record-slot");
+    if (!slot) { return; }
+    clear(slot);
+    if (!state.finalScore || !state.finalScore.passed) { return; }
+
+    var c = COURSE.completion;
+    var record = el("section", "record");
+    record.setAttribute("aria-labelledby", "record-title");
+
+    /* Print-only masthead. [[CONFIRM: SETU logo asset for print at the
+       20mm minimum; a labelled box stands in until it is supplied.]] */
+    var printHead = el("div", "record__print-head");
+    var printLogo = el("div", "record__print-logo", COURSE.ui.logoPrintPlaceholder);
+    printHead.appendChild(printLogo);
+    printHead.appendChild(el("p", null, COURSE.title));
+    record.appendChild(printHead);
+
+    var title = el("h3", "record__title", c.title);
+    title.id = "record-title";
+    record.appendChild(title);
+    record.appendChild(richInto(el("p"), c.intro));
+
+    /* The name field itself does not print; the value does. */
+    var nameWrap = el("div", "field record__field");
+    var nameId = "record-name";
+    var nameLabel = el("label", "field__label", c.nameLabel);
+    nameLabel.setAttribute("for", nameId);
+    var nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.id = nameId;
+    nameInput.className = "field__input";
+    nameInput.placeholder = c.namePlaceholder;
+    nameInput.value = state.recordName || "";
+    nameWrap.appendChild(nameLabel);
+    nameWrap.appendChild(nameInput);
+    record.appendChild(nameWrap);
+
+    var list = el("dl");
+
+    var nameValue = el("dd", null, state.recordName || "—");
+    if (state.recordName) {
+      list.appendChild(el("dt", null, c.nameHeading));
+      list.appendChild(nameValue);
+    }
+    nameInput.addEventListener("input", function () {
+      state.recordName = nameInput.value;
+      save();
+      renderRecord();
+      var again = byId(nameId);
+      if (again) {
+        again.focus();
+        again.setSelectionRange(again.value.length, again.value.length);
+      }
+    });
+
+    list.appendChild(el("dt", null, c.courseLabel));
+    list.appendChild(el("dd", null, COURSE.title));
+
+    list.appendChild(el("dt", null, c.dateLabel));
+    list.appendChild(el("dd", null, formatToday(state.completedAt)));
+
+    list.appendChild(el("dt", null, c.scoreLabel));
+    list.appendChild(el("dd", null, fill(COURSE.ui.recordScore, {
+      correct: state.finalScore.correct, total: state.finalScore.total
+    })));
+
+    record.appendChild(list);
+
+    record.appendChild(el("h4", null, c.reflectionsLabel));
+    var reflections = el("dl");
+    collectReflections().forEach(function (item) {
+      reflections.appendChild(el("dt", null, item.label));
+      var answer = el("dd", "record__answer", item.answer || c.noReflection);
+      reflections.appendChild(answer);
+    });
+    record.appendChild(reflections);
+
+    record.appendChild(el("h4", null, c.declarationLabel));
+    var declaration = collectDeclaration();
+    record.appendChild(el("p", "record__answer", declaration || c.noDeclaration));
+
+    var row = el("div", "btn-row");
+    var print = el("button", "btn", c.printLabel);
+    print.type = "button";
+    print.addEventListener("click", function () { window.print(); });
+    row.appendChild(print);
+    record.appendChild(row);
+
+    record.appendChild(richInto(el("p", "record__footnote"), c.footnote));
+    slot.appendChild(record);
+  };
+
+
+  function renderBlock(block, module) {
+    if (!block || typeof block.type !== "string") {
+      console.warn("content.js: a block with no type was skipped.", block);
+      return null;
+    }
+    var fn = renderers[block.type];
+    if (typeof fn !== "function") {
+      console.warn('content.js: unknown block type "' + block.type + '" was skipped.');
+      return null;
+    }
+    try {
+      return fn(block, module);
+    } catch (e) {
+      console.warn('content.js: the "' + block.type + '" block could not be rendered and was skipped.', e);
+      return null;
+    }
+  }
+
+  /* ------------------------------------------------------------------
+     5. Module rendering
+     ------------------------------------------------------------------ */
+  var moduleRoot, moduleNav, contentsList, resumeSlot;
+
+  function moduleIndexById(id) {
+    for (var i = 0; i < COURSE.modules.length; i++) {
+      if (COURSE.modules[i].id === id) { return i; }
+    }
+    return -1;
+  }
+
+  function renderModule(index) {
+    var module = COURSE.modules[index];
+    clear(moduleRoot);
+    moduleRoot.setAttribute("aria-labelledby", "module-title");
+
+    var head = el("div", "module__head");
+
+    /* The brand 'U' device, one instance per screen, anchored to the top
+       of its area, holding the module number (§9.5). */
+    var u = el("div", "u-shape");
+    u.setAttribute("aria-hidden", "true");
+    u.appendChild(el("span", "u-shape__number", String(module.number)));
+    head.appendChild(u);
+
+    var headText = el("div", "module__headtext");
+    headText.appendChild(el("p", "module__eyebrow", fill(COURSE.ui.moduleEyebrow, {
+      label: COURSE.ui.moduleLabel,
+      number: module.number,
+      last: COURSE.modules[COURSE.modules.length - 1].number,
+      minutes: module.minutes,
+      min: COURSE.ui.minutesLabel
+    })));
+    var title = el("h2", "module__title", module.title);
+    title.id = "module-title";
+    headText.appendChild(title);
+    headText.appendChild(richInto(el("p", "module__summary"), module.summary));
+    head.appendChild(headText);
+    moduleRoot.appendChild(head);
+
+    (module.blocks || []).forEach(function (block) {
+      var node = renderBlock(block, module);
+      if (node) { moduleRoot.appendChild(node); }
+    });
+
+    if (index === COURSE.modules.length - 1) {
+      var slot = el("div");
+      slot.id = "record-slot";
+      moduleRoot.appendChild(slot);
+      renderRecord();
+    }
+
+    renderModuleNav(index);
+    renderContents();
+    updateProgress();
+  }
+
+  function renderModuleNav(index) {
+    clear(moduleNav);
+    var last = COURSE.modules.length - 1;
+
+    if (index > 0) {
+      var prev = el("button", "btn btn--secondary", COURSE.ui.previousLabel);
+      prev.type = "button";
+      prev.addEventListener("click", function () { go(index - 1); });
+      moduleNav.appendChild(prev);
+    } else {
+      moduleNav.appendChild(el("span"));
+    }
+
+    var next = el("button", "btn");
+    next.type = "button";
+    if (index < last) {
+      next.textContent = COURSE.ui.continueLabel + " " + COURSE.modules[index + 1].number;
+      next.addEventListener("click", function () {
+        completeModule(index);
+        go(index + 1);
+      });
+    } else {
+      next.textContent = COURSE.ui.finishLabel;
+      next.addEventListener("click", function () {
+        completeModule(index);
+        updateProgress();
+        renderContents();
+        var target = byId("final-check-anchor") || moduleRoot;
+        if (target.focus) { target.focus(); }
+        target.scrollIntoView({ block: "start" });
+      });
+    }
+    moduleNav.appendChild(next);
+  }
+
+  function completeModule(index) {
+    var id = COURSE.modules[index].id;
+    if (!state.completed[id]) {
+      state.completed[id] = true;
+      save();
+    }
+  }
+
+  /* ------------------------------------------------------------------
+     6. Contents and progress
+     ------------------------------------------------------------------ */
+  function renderContents() {
+    clear(contentsList);
+    COURSE.modules.forEach(function (module, index) {
+      var item = el("li", "contents__item");
+      var link = el("a", "contents__link");
+      link.href = "#module-" + module.id;
+      if (index === state.current) { link.setAttribute("aria-current", "true"); }
+
+      link.appendChild(el("span", "contents__title", module.number + ". " + module.title));
+
+      var status = state.completed[module.id]
+        ? COURSE.ui.completeLabel
+        : (index === state.current ? COURSE.ui.inProgressLabel : COURSE.ui.notStartedLabel);
+      link.appendChild(el("span", "contents__meta", fill(COURSE.ui.contentsMeta, {
+        minutes: module.minutes, min: COURSE.ui.minutesLabel, status: status
+      })));
+
+      item.appendChild(link);
+      contentsList.appendChild(item);
+    });
+  }
+
+  function updateProgress() {
+    var total = COURSE.modules.length;
+    var done = COURSE.modules.filter(function (m) { return state.completed[m.id]; }).length;
+    var pct = Math.round((done / total) * 100);
+
+    byId("site-progress").hidden = false;
+    byId("progress-label").textContent = COURSE.ui.progressLabel;
+    var countText = fill(COURSE.ui.progressCount, {
+      done: done, total: total, modules: COURSE.ui.progressOf
+    });
+    byId("progress-count").textContent = countText;
+    byId("progress-fill").style.width = pct + "%";
+
+    var track = byId("progress-fill").parentNode;
+    track.setAttribute("role", "progressbar");
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", String(total));
+    track.setAttribute("aria-valuenow", String(done));
+    track.setAttribute("aria-valuetext", countText);
+  }
+
+  /* ------------------------------------------------------------------
+     7. Routing
+     ------------------------------------------------------------------ */
+  var suppressHashHandling = false;
+
+  function go(index, opts) {
+    var options = opts || {};
+    if (index < 0 || index >= COURSE.modules.length) { return; }
+    state.current = index;
+    save();
+
+    suppressHashHandling = true;
+    var hash = "#module-" + COURSE.modules[index].id;
+    if (window.location.hash !== hash) {
+      window.location.hash = hash;
+    }
+    window.setTimeout(function () { suppressHashHandling = false; }, 0);
+
+    renderModule(index);
+
+    if (!options.silent) {
+      var main = byId("main");
+      main.focus();
+      window.scrollTo(0, 0);
+    }
+  }
+
+  function indexFromHash() {
+    var hash = window.location.hash || "";
+    var match = /^#module-(.+)$/.exec(hash);
+    if (!match) { return -1; }
+    return moduleIndexById(match[1]);
+  }
+
+  function handleHashChange() {
+    if (suppressHashHandling) { return; }
+    var index = indexFromHash();
+    if (index >= 0 && index !== state.current) { go(index); }
+  }
+
+  /* ------------------------------------------------------------------
+     8. Resume
+     ------------------------------------------------------------------ */
+  function renderResume(savedIndex) {
+    clear(resumeSlot);
+    var box = el("aside", "resume");
+    box.appendChild(el("h2", "resume__title", COURSE.intro.resumeTitle));
+    box.appendChild(el("p", null, COURSE.intro.resumeBody));
+
+    var row = el("div", "btn-row");
+    var resume = el("button", "btn",
+      COURSE.ui.resumeLabel + " " + COURSE.modules[savedIndex].number + ": " + COURSE.modules[savedIndex].title);
+    resume.type = "button";
+    resume.addEventListener("click", function () {
+      clear(resumeSlot);
+      go(savedIndex);
+    });
+
+    var again = el("button", "btn btn--secondary", COURSE.ui.startAgainLabel);
+    again.type = "button";
+    again.addEventListener("click", function () {
+      clear(resumeSlot);
+      go(0);
+    });
+
+    row.appendChild(resume);
+    row.appendChild(again);
+    box.appendChild(row);
+    resumeSlot.appendChild(box);
+  }
+
+  /* ------------------------------------------------------------------
+     9. Chrome: header, footer, contents toggle, reset
+     ------------------------------------------------------------------ */
+  function renderChrome() {
+    document.title = COURSE.title;
+    byId("skip-link").textContent = COURSE.ui.skipLink;
+    byId("course-org").textContent = COURSE.ui.orgName;
+    byId("course-title").textContent = COURSE.title;
+    byId("course-subtitle").textContent = COURSE.subtitle;
+
+    var logoBox = byId("logo-box");
+    logoBox.setAttribute("aria-label", COURSE.ui.logoPlaceholderAlt);
+    var logoLabel = byId("logo-label");
+    logoLabel.appendChild(document.createTextNode(COURSE.ui.logoPlaceholderLine1));
+    logoLabel.appendChild(document.createElement("br"));
+    logoLabel.appendChild(document.createTextNode(COURSE.ui.logoPlaceholderLine2));
+    byId("contents-heading").textContent = COURSE.ui.contentsTitle;
+
+    var toggle = byId("contents-toggle");
+    toggle.textContent = COURSE.ui.contentsToggle;
+    var list = byId("contents-list");
+
+    /* The list is a plain sticky column on desktop and a collapsible
+       panel on narrow screens. The toggle only exists below 60rem, so
+       the collapsed state is set from the same media query. */
+    var narrow = window.matchMedia("(max-width: 60rem)");
+    function syncCollapse() {
+      if (narrow.matches) {
+        var open = toggle.getAttribute("aria-expanded") === "true";
+        list.hidden = !open;
+      } else {
+        list.hidden = false;
+      }
+    }
+    toggle.addEventListener("click", function () {
+      var open = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", open ? "false" : "true");
+      syncCollapse();
+    });
+    if (narrow.addEventListener) {
+      narrow.addEventListener("change", syncCollapse);
+    } else if (narrow.addListener) {
+      narrow.addListener(syncCollapse);
+    }
+    list.addEventListener("click", function (event) {
+      if (event.target.closest && event.target.closest(".contents__link") && narrow.matches) {
+        toggle.setAttribute("aria-expanded", "false");
+        syncCollapse();
+      }
+    });
+    syncCollapse();
+
+    byId("footer-privacy").textContent = COURSE.footer.privacy;
+    byId("footer-review").textContent = COURSE.footer.reviewNote;
+    byId("confirms-summary").textContent =
+      COURSE.footer.confirmsTitle + " (" + COURSE.confirms.length + ")";
+    var confirmsList = byId("confirms-list");
+    COURSE.confirms.forEach(function (text) {
+      confirmsList.appendChild(el("li", null, text));
+    });
+
+    var reset = byId("reset-all");
+    reset.textContent = COURSE.footer.resetLabel;
+    reset.addEventListener("click", function () {
+      if (!window.confirm(COURSE.footer.resetConfirm)) { return; }
+      store.clearNamespace();
+      state = blankState();
+      clear(resumeSlot);
+      byId("footer-status").textContent = COURSE.footer.resetDone;
+      go(0);
+    });
+
+    if (!store.available) {
+      byId("footer-status").textContent = COURSE.intro.noStorageNotice;
+    }
+  }
+
+  /* ------------------------------------------------------------------
+     10. Start
+     ------------------------------------------------------------------ */
+  function start() {
+    if (typeof COURSE === "undefined") {
+      console.error("content.js did not load, so there is no course to show.");
+      return;
+    }
+
+    moduleRoot = byId("module-root");
+    moduleNav = byId("module-nav");
+    contentsList = byId("contents-list");
+    resumeSlot = byId("resume-slot");
+
+    loadState();
+    renderChrome();
+
+    var hashIndex = indexFromHash();
+    if (hashIndex >= 0) {
+      /* An explicit link wins: a lecturer sending someone to #module-3
+         should land there without being asked. */
+      go(hashIndex, { silent: true });
+    } else {
+      var savedIndex = Math.min(Math.max(state.current | 0, 0), COURSE.modules.length - 1);
+      var hasProgress = savedIndex > 0 ||
+        COURSE.modules.some(function (m) { return state.completed[m.id]; });
+      go(0, { silent: true });
+      if (hasProgress) { renderResume(savedIndex); }
+    }
+
+    window.addEventListener("hashchange", handleHashChange);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start);
+  } else {
+    start();
+  }
+}());
