@@ -1111,6 +1111,7 @@ const COURSE = {
     title: "Your completion record",
     intro: "This is a record you can keep, not an award. It is generated on this device from what you entered, and printing it is the only way it leaves the browser.",
     nameLabel: "Your name for this record (optional)",
+    nameHeading: "Name",
     namePlaceholder: "Leave blank if you would rather not",
     printLabel: "Print or save as PDF",
     courseLabel: "Course",

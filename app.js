@@ -61,6 +61,7 @@
       reflections: {},   /* reflectId + "/" + promptId -> text               */
       builders: {},      /* builderId -> field values                        */
       finalScore: null,  /* { correct, total, passed }                       */
+      completedAt: null, /* ISO date the final check was first passed        */
       recordName: ""
     };
   }
@@ -435,6 +436,7 @@
       clear(scoreRegion);
       if (block.scored) {
         state.finalScore = null;
+        state.completedAt = null;
         save();
         renderRecord();
       }
@@ -466,6 +468,7 @@
       scoreRegion.appendChild(panel);
 
       state.finalScore = { correct: correctCount, total: total, passed: pass };
+      if (pass && !state.completedAt) { state.completedAt = new Date().toISOString(); }
       save();
       renderRecord();
     }
@@ -1181,7 +1184,151 @@
     return section;
   };
 
-  /* --- INTERACTIONS --- */
+  /* ------------------------------------------------------------------
+     Completion record (§5)
+
+     Generated on the page once the final check is passed. A record the
+     student can keep, not an award: no certificate graphics and no
+     confetti. Printing it uses the print stylesheet, which leaves
+     nothing else on the page.
+     ------------------------------------------------------------------ */
+
+  function formatToday(iso) {
+    var date = iso ? new Date(iso) : new Date();
+    if (isNaN(date.getTime())) { date = new Date(); }
+    try {
+      return date.toLocaleDateString("en-IE", { day: "numeric", month: "long", year: "numeric" });
+    } catch (e) {
+      return date.toISOString().slice(0, 10);
+    }
+  }
+
+  function collectReflections() {
+    var out = [];
+    COURSE.modules.forEach(function (module) {
+      (module.blocks || []).forEach(function (block) {
+        if (block.type !== "reflect") { return; }
+        (block.prompts || []).forEach(function (prompt) {
+          var key = block.id + "/" + prompt.id;
+          out.push({
+            module: module.number + ". " + module.title,
+            label: prompt.label,
+            answer: (state.reflections[key] || "").trim()
+          });
+        });
+      });
+    });
+    return out;
+  }
+
+  function collectDeclaration() {
+    var text = "";
+    COURSE.modules.forEach(function (module) {
+      (module.blocks || []).forEach(function (block) {
+        if (block.type !== "builder") { return; }
+        var data = state.builders[block.id];
+        if (!data) { return; }
+        var touched = data.tools.some(function (t) { return t.trim(); }) ||
+          data.dates.trim() || data.name.trim() || data.assignment.trim() ||
+          Object.keys(data.purposes).some(function (k) { return data.purposes[k]; });
+        if (touched) { text = declarationText(block, data); }
+      });
+    });
+    return text;
+  }
+
+  renderRecord = function () {
+    var slot = byId("record-slot");
+    if (!slot) { return; }
+    clear(slot);
+    if (!state.finalScore || !state.finalScore.passed) { return; }
+
+    var c = COURSE.completion;
+    var record = el("section", "record");
+    record.setAttribute("aria-labelledby", "record-title");
+
+    /* Print-only masthead. [[CONFIRM: SETU logo asset for print at the
+       20mm minimum; a labelled box stands in until it is supplied.]] */
+    var printHead = el("div", "record__print-head");
+    var printLogo = el("div", "record__print-logo", "SETU master logo — asset to be supplied");
+    printHead.appendChild(printLogo);
+    printHead.appendChild(el("p", null, COURSE.title));
+    record.appendChild(printHead);
+
+    var title = el("h3", "record__title", c.title);
+    title.id = "record-title";
+    record.appendChild(title);
+    record.appendChild(richInto(el("p"), c.intro));
+
+    /* The name field itself does not print; the value does. */
+    var nameWrap = el("div", "field record__field");
+    var nameId = "record-name";
+    var nameLabel = el("label", "field__label", c.nameLabel);
+    nameLabel.setAttribute("for", nameId);
+    var nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.id = nameId;
+    nameInput.className = "field__input";
+    nameInput.placeholder = c.namePlaceholder;
+    nameInput.value = state.recordName || "";
+    nameWrap.appendChild(nameLabel);
+    nameWrap.appendChild(nameInput);
+    record.appendChild(nameWrap);
+
+    var list = el("dl");
+
+    var nameValue = el("dd", null, state.recordName || "—");
+    if (state.recordName) {
+      list.appendChild(el("dt", null, c.nameHeading));
+      list.appendChild(nameValue);
+    }
+    nameInput.addEventListener("input", function () {
+      state.recordName = nameInput.value;
+      save();
+      renderRecord();
+      var again = byId(nameId);
+      if (again) {
+        again.focus();
+        again.setSelectionRange(again.value.length, again.value.length);
+      }
+    });
+
+    list.appendChild(el("dt", null, c.courseLabel));
+    list.appendChild(el("dd", null, COURSE.title));
+
+    list.appendChild(el("dt", null, c.dateLabel));
+    list.appendChild(el("dd", null, formatToday(state.completedAt)));
+
+    list.appendChild(el("dt", null, c.scoreLabel));
+    list.appendChild(el("dd", null,
+      state.finalScore.correct + " of " + state.finalScore.total + " correct"));
+
+    record.appendChild(list);
+
+    record.appendChild(el("h4", null, c.reflectionsLabel));
+    var reflections = el("dl");
+    collectReflections().forEach(function (item) {
+      reflections.appendChild(el("dt", null, item.label));
+      var answer = el("dd", "record__answer", item.answer || c.noReflection);
+      reflections.appendChild(answer);
+    });
+    record.appendChild(reflections);
+
+    record.appendChild(el("h4", null, c.declarationLabel));
+    var declaration = collectDeclaration();
+    record.appendChild(el("p", "record__answer", declaration || c.noDeclaration));
+
+    var row = el("div", "btn-row");
+    var print = el("button", "btn", c.printLabel);
+    print.type = "button";
+    print.addEventListener("click", function () { window.print(); });
+    row.appendChild(print);
+    record.appendChild(row);
+
+    record.appendChild(richInto(el("p", "record__footnote"), c.footnote));
+    slot.appendChild(record);
+  };
+
 
   function renderBlock(block, module) {
     if (!block || typeof block.type !== "string") {
@@ -1242,6 +1389,13 @@
       var node = renderBlock(block, module);
       if (node) { moduleRoot.appendChild(node); }
     });
+
+    if (index === COURSE.modules.length - 1) {
+      var slot = el("div");
+      slot.id = "record-slot";
+      moduleRoot.appendChild(slot);
+      renderRecord();
+    }
 
     renderModuleNav(index);
     renderContents();
