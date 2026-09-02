@@ -1,0 +1,551 @@
+/* =====================================================================
+   styles.css — Using Gen AI at SETU
+   Source: SETU Brand Guidelines, Version 1, May 2022.
+   [[CONFIRM: whether a version later than V1 (May 2022) now applies]]
+   Style review date: 2026-09-02
+
+   Colour rules applied here, from the brand document:
+   - Slate grey is the primary colour and carries all body copy.
+   - Secondaries always appear alongside slate, never on their own.
+   - A small, consistent set is used: sea green for interactive elements
+     and the progress indicator, grass green for correct, sunset red for
+     incorrect. The remaining secondaries are declared but not used.
+   - No gradients, no tints, no mixes. The only derived values are three
+     alphas of slate itself, for the progress track (15%, named in the
+     brand's own suggested combinations), hairline rules and panel fills.
+   - Correctness is never carried by colour: every state also has a word
+     and a shape.
+   ===================================================================== */
+
+/* ---------- 1. Brand tokens (§9.1 — do not change without checking the
+   brand guidelines; see README.md) ---------- */
+:root {
+  --setu-slate:          #435465;  /* primary — body copy, headings, UI text */
+  --setu-sunset-red:     #E74751;  /* incorrect: rule and icon only */
+  --setu-sunrise-yellow: #FCCA3A;  /* declared, not used in v1 */
+  --setu-clover-pink:    #A752A0;  /* declared, not used in v1 */
+  --setu-suir-blue:      #2AC5F4;  /* declared, not used in v1 */
+  --setu-heather-purple: #5F5AA8;  /* declared, not used in v1 */
+  --setu-barrow-blue:    #0062AF;  /* declared, not used in v1 */
+  --setu-grass-green:    #4EB47D;  /* correct: rule and icon only */
+  --setu-sea-green:      #378B84;  /* interactive, progress */
+  --setu-white:          #FFFFFF;
+
+  /* Slate at reduced opacity. Same colour, not a new one. */
+  --slate-15: rgba(67, 84, 101, 0.15); /* progress track (§9.2) */
+  --slate-22: rgba(67, 84, 101, 0.22); /* hairline rules, control borders */
+  --slate-05: rgba(67, 84, 101, 0.05); /* quiet panel fill */
+
+  /* Type scale: 1.25 ratio from a 17px base. */
+  --fs--1: 0.85rem;
+  --fs-0:  1.0625rem;
+  --fs-1:  1.328rem;
+  --fs-2:  1.66rem;
+  --fs-3:  2.075rem;
+  --fs-4:  2.594rem;
+
+  --font-body: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-head: "DM Sans", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --measure: 68ch;
+  --radius: 6px;
+  --space: 1rem;
+}
+
+/* ---------- 2. Self-hosted fonts (§9.6). Nothing is requested from a CDN. ---------- */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("assets/fonts/inter-latin-var.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("assets/fonts/inter-latin-ext-var.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0,
+    U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("assets/fonts/dmsans-700-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("assets/fonts/dmsans-700-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0,
+    U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------- 3. Base ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--setu-white);
+  color: var(--setu-slate);
+  font-family: var(--font-body);
+  font-size: var(--fs-0);
+  line-height: 1.6;
+  text-align: left;            /* never justified (§8) */
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-head);
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0 0 0.5em;
+  text-align: left;
+  text-transform: none;        /* no all-caps headings (§9.6) */
+}
+h1 { font-size: var(--fs-3); }
+h2 { font-size: var(--fs-2); }
+h3 { font-size: var(--fs-1); }
+h4 { font-size: var(--fs-0); }
+
+p, li { max-width: var(--measure); }
+p { margin: 0 0 1em; }
+
+strong { font-weight: 600; }
+
+a {
+  /* Sea green text on white measures 4.05:1, below the 4.5:1 needed for
+     body-size text, so links are slate with a sea green underline: the
+     text meets contrast and the underline is the accent. */
+  color: var(--setu-slate);
+  text-decoration: underline;
+  text-decoration-color: var(--setu-sea-green);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+a:hover { text-decoration-thickness: 3px; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.skip-link {
+  position: absolute; left: -9999px; top: 0; z-index: 20;
+  background: var(--setu-slate); color: var(--setu-white);
+  padding: 0.75rem 1rem; font-family: var(--font-head); font-weight: 700;
+  text-decoration: none;
+}
+.skip-link:focus { left: 0; }
+
+.noscript {
+  margin: 2rem auto; max-width: var(--measure); padding: 0 1.25rem;
+}
+
+/* Build-time placeholders, made obvious on the page (§13). */
+.confirm-marker {
+  font-family: var(--font-head);
+  font-size: var(--fs--1);
+  font-weight: 700;
+  color: var(--setu-slate);
+  background: var(--slate-05);
+  border: 2px dashed var(--slate-22);
+  border-radius: var(--radius);
+  padding: 0.1em 0.45em;
+  display: inline;
+}
+
+/* ---------- 4. Layout ---------- */
+.wrap { width: 100%; max-width: 68rem; margin: 0 auto; padding: 0 1.25rem; }
+
+.layout {
+  display: grid;
+  grid-template-columns: 16rem minmax(0, 1fr);
+  gap: 3rem;
+  align-items: start;
+  padding-top: 2rem;
+  padding-bottom: 3rem;
+}
+main { min-width: 0; }
+main:focus { outline: none; }
+
+@media (max-width: 60rem) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+}
+
+/* ---------- 5. Header and logo ---------- */
+.site-header { border-bottom: 1px solid var(--slate-22); }
+.site-header__inner {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 1.5rem; padding-top: 1.25rem; padding-bottom: 1.25rem;
+}
+
+/* Clearance on all sides is at least the width of the uppercase U of the
+   acronym, approximated here as 0.55 x logo height while the real asset
+   is outstanding. Minimum on-screen height for the master logo is 60px. */
+.logo-slot { padding: 33px; margin: -33px; }
+.logo-slot__box {
+  height: 60px; width: 192px;      /* placeholder proportions [[CONFIRM]] */
+  border: 2px dashed var(--slate-22);
+  border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 0.5rem;
+}
+.logo-slot__label {
+  font-size: 0.72rem; line-height: 1.3; color: var(--setu-slate);
+}
+
+.site-header__org {
+  font-size: var(--fs--1); margin: 0 0 0.15rem; letter-spacing: 0.01em;
+}
+.site-header__title { font-size: var(--fs-2); margin: 0 0 0.15rem; }
+.site-header__sub { font-size: var(--fs-0); margin: 0; }
+
+/* ---------- 6. Progress ---------- */
+.site-progress { border-bottom: 1px solid var(--slate-22); }
+.site-progress__inner { padding-top: 0.9rem; padding-bottom: 0.9rem; }
+.site-progress__meta {
+  display: flex; justify-content: space-between; gap: 1rem;
+  font-size: var(--fs--1); margin-bottom: 0.4rem;
+}
+.site-progress__label { font-family: var(--font-head); font-weight: 700; }
+.site-progress__track {
+  height: 10px; background: var(--slate-15); border-radius: 5px; overflow: hidden;
+}
+.site-progress__fill {
+  height: 100%; width: 0%; background: var(--setu-sea-green);
+  border-radius: 5px; transition: width 240ms ease;
+}
+
+/* ---------- 7. Contents ---------- */
+.contents { position: sticky; top: 1rem; }
+.contents__head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.contents__heading { font-size: var(--fs-0); margin-bottom: 0.75rem; }
+.contents__toggle { display: none; }
+
+.contents__list { list-style: none; margin: 0; padding: 0; }
+.contents__item { margin: 0 0 0.25rem; max-width: none; }
+
+.contents__link {
+  display: block; width: 100%; text-align: left;
+  background: none; border: 0; border-left: 4px solid var(--slate-15);
+  padding: 0.5rem 0.5rem 0.5rem 0.75rem;
+  font: inherit; font-size: var(--fs--1); color: var(--setu-slate);
+  cursor: pointer; min-height: 44px;
+}
+.contents__link:hover { background: var(--slate-05); }
+.contents__link[aria-current="true"] {
+  border-left-color: var(--setu-sea-green);
+  background: var(--slate-05);
+}
+.contents__title { font-family: var(--font-head); font-weight: 700; display: block; }
+.contents__meta { display: block; }
+
+@media (max-width: 60rem) {
+  .contents { position: static; border: 1px solid var(--slate-22); border-radius: var(--radius); padding: 0.75rem 1rem; }
+  .contents__heading { margin-bottom: 0; }
+  .contents__toggle {
+    display: inline-block; min-height: 44px; padding: 0 0.75rem;
+    background: none; border: 2px solid var(--setu-sea-green); border-radius: var(--radius);
+    font-family: var(--font-head); font-weight: 700; font-size: var(--fs--1);
+    color: var(--setu-slate); cursor: pointer;
+  }
+  .contents__list { margin-top: 0.75rem; }
+  .contents__list[hidden] { display: none; }
+}
+
+/* ---------- 8. Module head and the 'U' shape device ---------- */
+.module { margin: 0; }
+
+.module__head {
+  display: flex; align-items: flex-start; gap: 1.25rem; margin-bottom: 1.75rem;
+}
+
+/* The brand's 'U' device, used once per screen as the container for the
+   module number, anchored to the top of its area, not rotated or stretched.
+   [[CONFIRM: the official 'U' shape asset and its correct proportions.
+   This is a plain geometric placeholder — the crest must not be traced.]] */
+.u-shape {
+  flex: 0 0 auto;
+  width: 64px; height: 80px;
+  background: var(--setu-sea-green);
+  border-radius: 4px 4px 46% 46% / 4px 4px 34% 34%;
+  display: flex; align-items: center; justify-content: center;
+  align-self: flex-start;
+  padding-bottom: 0.5rem;
+}
+.u-shape__number {
+  /* White on sea green measures 4.05:1, which meets the 3:1 large-text
+     threshold. Set well above 18.66px bold so it qualifies. */
+  font-family: var(--font-head); font-weight: 700; font-size: var(--fs-2);
+  color: var(--setu-white); line-height: 1;
+}
+.module__eyebrow { font-size: var(--fs--1); margin: 0 0 0.15rem; }
+.module__title { font-size: var(--fs-3); margin: 0 0 0.35rem; }
+.module__summary { margin: 0; }
+
+.block { margin: 0 0 2rem; }
+.block__heading { font-size: var(--fs-1); margin-top: 2.25rem; }
+.block ul, .block ol { padding-left: 1.35rem; margin: 0 0 1em; }
+.block li { margin-bottom: 0.5em; }
+.block__lead { margin-bottom: 0.6em; }
+
+/* ---------- 9. Callouts ---------- */
+.callout {
+  border: 1px solid var(--slate-22);
+  border-left: 6px solid var(--setu-sea-green);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.25rem 0.35rem;
+  max-width: var(--measure);
+}
+.callout--warning { border-left-color: var(--setu-sunset-red); }
+.callout--quote { border-left-color: var(--setu-sea-green); background: var(--slate-05); }
+.callout__title { font-size: var(--fs-0); margin-bottom: 0.4rem; }
+.callout__attribution { font-size: var(--fs--1); margin-top: 0.75rem; }
+.callout p, .callout li { max-width: none; }
+
+/* ---------- 10. Buttons ---------- */
+.btn {
+  font-family: var(--font-head); font-weight: 700;
+  font-size: 1.1875rem;          /* 19px: large text on sea green (§9.3) */
+  line-height: 1.2;
+  min-height: 48px;              /* touch target ≥ 44px */
+  padding: 0.6rem 1.15rem;
+  border-radius: var(--radius);
+  border: 2px solid var(--setu-sea-green);
+  background: var(--setu-sea-green);
+  color: var(--setu-white);
+  cursor: pointer;
+  text-align: left;
+}
+.btn:hover { border-color: var(--setu-slate); background: var(--setu-slate); }
+.btn[disabled] { opacity: 0.55; cursor: not-allowed; }
+
+.btn--secondary { background: var(--setu-white); color: var(--setu-slate); }
+.btn--secondary:hover { background: var(--slate-05); border-color: var(--setu-slate); color: var(--setu-slate); }
+
+.btn--quiet {
+  background: none; color: var(--setu-slate);
+  border: 2px solid var(--slate-22); font-size: var(--fs--1); min-height: 44px;
+}
+.btn--quiet:hover { background: var(--slate-05); border-color: var(--setu-slate); color: var(--setu-slate); }
+
+.btn-row { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1.25rem 0 0; }
+
+.module-nav {
+  display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: space-between;
+  border-top: 1px solid var(--slate-22); padding-top: 1.5rem; margin-top: 2.5rem;
+}
+
+/* ---------- 11. Focus (§8: never colour alone, minimum 2px) ---------- */
+:focus { outline: 3px solid var(--setu-slate); outline-offset: 2px; }
+:focus:not(:focus-visible) { outline: none; }
+:focus-visible { outline: 3px solid var(--setu-slate); outline-offset: 2px; }
+
+/* ---------- 12. Knowledge check ---------- */
+.check { border-top: 1px solid var(--slate-22); padding-top: 1.5rem; }
+.check__title { font-size: var(--fs-1); }
+.question { margin: 0 0 2.25rem; }
+.question__prompt { font-family: var(--font-head); font-weight: 700; margin-bottom: 0.25rem; }
+.question__hint { font-size: var(--fs--1); margin-bottom: 0.75rem; }
+
+.options { list-style: none; margin: 0 0 1rem; padding: 0; max-width: var(--measure); }
+.options li { margin: 0 0 0.5rem; max-width: none; }
+
+.option {
+  display: flex; align-items: flex-start; gap: 0.75rem;
+  border: 2px solid var(--slate-22); border-radius: var(--radius);
+  padding: 0.7rem 0.9rem; min-height: 44px; cursor: pointer;
+}
+.option:hover { background: var(--slate-05); }
+.option__input { margin: 0.28rem 0 0; width: 1.15rem; height: 1.15rem; flex: 0 0 auto; accent-color: var(--setu-sea-green); }
+.option__text { max-width: none; }
+.option--chosen { border-color: var(--setu-sea-green); }
+
+.feedback { margin: 0 0 0.5rem; max-width: var(--measure); }
+.feedback__item {
+  border-left: 6px solid var(--slate-22);
+  padding: 0.6rem 0 0.6rem 0.9rem;
+  margin-bottom: 0.75rem;
+}
+.feedback__item--correct { border-left-color: var(--setu-grass-green); }
+.feedback__item--incorrect { border-left-color: var(--setu-sunset-red); }
+.feedback__status {
+  display: flex; align-items: center; gap: 0.4rem;
+  font-family: var(--font-head); font-weight: 700; font-size: 1.1875rem;
+  margin: 0 0 0.2rem;
+}
+.feedback__icon { flex: 0 0 auto; width: 1.15rem; height: 1.15rem; }
+.feedback__icon--correct { color: var(--setu-grass-green); }
+.feedback__icon--incorrect { color: var(--setu-sunset-red); }
+.feedback__option { font-size: var(--fs--1); margin: 0 0 0.2rem; }
+.feedback__why { margin: 0; }
+.check__saved { font-size: var(--fs--1); }
+
+/* ---------- 13. Card sort ---------- */
+.sort__intro { max-width: var(--measure); }
+.sort__pool { list-style: none; margin: 0 0 1.5rem; padding: 0; }
+.sort__pool li { margin: 0 0 0.5rem; max-width: none; }
+
+.card {
+  display: block; width: 100%; text-align: left;
+  border: 2px solid var(--slate-22); border-radius: var(--radius);
+  background: var(--setu-white); color: var(--setu-slate);
+  font: inherit; padding: 0.7rem 0.9rem; min-height: 44px; cursor: pointer;
+}
+.card:hover { background: var(--slate-05); }
+.card[aria-pressed="true"] {
+  border-color: var(--setu-sea-green); border-width: 3px; background: var(--slate-05);
+}
+.card__selected {
+  display: inline-block; font-family: var(--font-head); font-weight: 700;
+  font-size: var(--fs--1); margin-right: 0.4rem;
+}
+
+.sort__columns { display: grid; gap: 1rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 46rem) { .sort__columns { grid-template-columns: minmax(0, 1fr); } }
+
+.bucket { border: 1px solid var(--slate-22); border-radius: var(--radius); padding: 0.9rem; }
+.bucket__title { font-size: var(--fs-0); margin-bottom: 0.2rem; }
+.bucket__hint { font-size: var(--fs--1); margin-bottom: 0.75rem; }
+.bucket__place { width: 100%; }
+.bucket__list { list-style: none; margin: 0.75rem 0 0; padding: 0; }
+.bucket__list li { margin: 0 0 0.5rem; max-width: none; }
+.bucket__empty { font-size: var(--fs--1); margin: 0.75rem 0 0; }
+
+.placed { border: 2px solid var(--slate-22); border-radius: var(--radius); padding: 0.6rem 0.75rem; }
+.placed--right { border-left: 6px solid var(--setu-grass-green); }
+.placed--wrong { border-left: 6px solid var(--setu-sunset-red); }
+.placed__mark {
+  display: flex; align-items: center; gap: 0.4rem;
+  font-family: var(--font-head); font-weight: 700; font-size: var(--fs--1); margin: 0.4rem 0 0.2rem;
+}
+.placed__text { font-size: var(--fs--1); margin: 0; }
+.placed__explain { font-size: var(--fs--1); margin: 0.35rem 0 0; }
+.placed__remove { margin-top: 0.4rem; }
+.sort__summary { border-left: 6px solid var(--setu-sea-green); padding-left: 0.9rem; margin-top: 1.5rem; }
+
+/* ---------- 14. Permission spectrum ---------- */
+.slider__track { margin: 1.5rem 0; }
+.slider__input { width: 100%; max-width: 34rem; height: 44px; accent-color: var(--setu-sea-green); display: block; }
+.slider__marks { list-style: none; display: flex; margin: 0.25rem 0 0; padding: 0; max-width: 34rem; }
+.slider__mark { flex: 1 1 0; font-size: var(--fs--1); text-align: left; max-width: none; }
+.slider__mark--on { font-family: var(--font-head); font-weight: 700; }
+.slider__mark span { display: block; border-top: 4px solid var(--slate-15); padding-top: 0.35rem; }
+.slider__mark--on span { border-top-color: var(--setu-sea-green); }
+
+.stop { border: 1px solid var(--slate-22); border-left: 6px solid var(--setu-sea-green); border-radius: var(--radius); padding: 1.1rem 1.25rem; max-width: var(--measure); }
+.stop__title { font-size: var(--fs-1); margin-bottom: 0.15rem; }
+.stop__sub { margin-bottom: 1rem; }
+.stop__label { font-family: var(--font-head); font-weight: 700; font-size: var(--fs-0); margin: 1rem 0 0.3rem; }
+.stop p, .stop li { max-width: none; }
+.slider__closing { font-family: var(--font-head); font-weight: 700; margin-top: 1.25rem; max-width: var(--measure); }
+
+/* ---------- 15. Declaration builder ---------- */
+.builder { border: 1px solid var(--slate-22); border-radius: var(--radius); padding: 1.25rem; }
+.field { margin: 0 0 1.1rem; max-width: 34rem; }
+.field__label { display: block; font-family: var(--font-head); font-weight: 700; font-size: var(--fs--1); margin-bottom: 0.3rem; }
+.field__input, .field__textarea {
+  width: 100%; font: inherit; color: var(--setu-slate);
+  border: 2px solid var(--slate-22); border-radius: var(--radius);
+  padding: 0.55rem 0.7rem; min-height: 44px; background: var(--setu-white);
+}
+.field__textarea { min-height: 8rem; line-height: 1.5; resize: vertical; }
+.field__input:hover, .field__textarea:hover { border-color: var(--setu-slate); }
+
+.tool-row { display: flex; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.5rem; }
+.tool-row .field__input { flex: 1 1 auto; }
+
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li { margin: 0 0 0.4rem; max-width: none; }
+.checkline { display: flex; align-items: flex-start; gap: 0.6rem; min-height: 44px; padding: 0.4rem 0; cursor: pointer; }
+.checkline input { margin: 0.35rem 0 0; width: 1.15rem; height: 1.15rem; flex: 0 0 auto; accent-color: var(--setu-sea-green); }
+
+.builder__formats { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1.5rem 0 0.5rem; }
+.builder__hint { font-size: var(--fs--1); }
+.builder__note { font-size: var(--fs--1); border-top: 1px solid var(--slate-22); padding-top: 0.9rem; margin-top: 1.25rem; }
+.builder__status { font-size: var(--fs--1); min-height: 1.6em; margin: 0.5rem 0 0; }
+
+/* ---------- 16. Reflection ---------- */
+.reflect { border: 1px solid var(--slate-22); border-left: 6px solid var(--setu-sea-green); border-radius: var(--radius); padding: 1.1rem 1.25rem; }
+.reflect__note { font-size: var(--fs--1); }
+.reflect__status { font-size: var(--fs--1); min-height: 1.6em; margin: 0.3rem 0 0; }
+
+/* ---------- 17. v2 stubs ---------- */
+.stub { border: 2px dashed var(--slate-22); border-radius: var(--radius); padding: 1.1rem 1.25rem; }
+.stub__flag { font-family: var(--font-head); font-weight: 700; font-size: var(--fs--1); margin: 0 0 0.4rem; }
+.stub__heading { font-size: var(--fs-0); }
+
+/* ---------- 18. Resume banner ---------- */
+.resume { border: 2px solid var(--setu-sea-green); border-radius: var(--radius); padding: 1.1rem 1.25rem; margin-bottom: 2rem; }
+.resume__title { font-size: var(--fs-1); }
+
+/* ---------- 19. Score and completion record ---------- */
+.score { border: 1px solid var(--slate-22); border-left: 6px solid var(--setu-sea-green); border-radius: var(--radius); padding: 1.1rem 1.25rem; margin: 1.5rem 0; }
+.score__headline { font-family: var(--font-head); font-weight: 700; font-size: var(--fs-1); margin-bottom: 0.3rem; }
+
+.record { border-top: 4px solid var(--setu-sea-green); padding-top: 1.5rem; margin-top: 2.5rem; }
+.record__title { font-size: var(--fs-2); }
+.record__print-head { display: none; }
+.record dl { margin: 1.5rem 0; max-width: var(--measure); }
+.record dt { font-family: var(--font-head); font-weight: 700; font-size: var(--fs--1); margin-top: 1rem; }
+.record dd { margin: 0.15rem 0 0; }
+.record__answer { white-space: pre-wrap; }
+.record__footnote { font-size: var(--fs--1); border-top: 1px solid var(--slate-22); padding-top: 0.9rem; margin-top: 1.5rem; }
+
+/* ---------- 20. Footer ---------- */
+.site-footer { border-top: 1px solid var(--slate-22); margin-top: 2rem; }
+.site-footer__inner { padding-top: 1.75rem; padding-bottom: 2.5rem; }
+.site-footer__privacy { font-family: var(--font-head); font-weight: 700; font-size: var(--fs--1); }
+.site-footer__review, .site-footer__status { font-size: var(--fs--1); }
+.confirms { margin: 1rem 0; max-width: var(--measure); }
+.confirms__summary { font-family: var(--font-head); font-weight: 700; font-size: var(--fs--1); cursor: pointer; min-height: 44px; padding: 0.7rem 0; }
+.confirms__list { padding-left: 1.35rem; }
+.confirms__list li { font-size: var(--fs--1); margin-bottom: 0.4rem; }
+
+/* ---------- 21. Motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------- 22. Print: the completion record only (§10) ---------- */
+@media print {
+  .site-header, .site-progress, .contents, .module-nav, .site-footer,
+  .skip-link, .resume, .noscript, .btn, .u-shape, .module__head,
+  .block, .check, .score, .record__field { display: none !important; }
+
+  body { color: var(--setu-slate); background: var(--setu-white); font-size: 11pt; }
+  .layout { display: block; padding: 0; }
+  .wrap { max-width: none; padding: 0; }
+
+  .record { display: block; border-top: 0; padding-top: 0; margin-top: 0; }
+  .record__print-head { display: block; margin-bottom: 1.5rem; }
+  .record__print-logo {
+    /* Print minimum for the master logo is 20mm. [[CONFIRM: asset]] */
+    height: 20mm; width: 64mm; border: 1pt dashed var(--setu-slate);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8pt; padding: 0 2mm; margin-bottom: 4mm;
+  }
+  .record dl, .record p, .record li { max-width: none; }
+  .record dt { break-after: avoid; page-break-after: avoid; }
+  .record dd { break-inside: avoid; page-break-inside: avoid; }
+  .record__title { break-after: avoid; page-break-after: avoid; }
+  a { text-decoration: none; }
+}
