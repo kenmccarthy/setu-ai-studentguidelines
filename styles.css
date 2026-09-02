@@ -15,6 +15,48 @@
      brand's own suggested combinations), hairline rules and panel fills.
    - Correctness is never carried by colour: every state also has a word
      and a shape.
+
+   ---------------------------------------------------------------------
+   MEASURED CONTRAST — every foreground/background pair actually shipped,
+   measured in the browser on the rendered page, 2026-09-02. Re-measure if
+   you change a colour, a size or a pairing.
+
+   TEXT (needs 4.5:1, or 3:1 for large type — over 24px, or over 18.66px bold)
+     slate on white .................. 7.79:1   11.5-33.2px, 400/600/700   PASS
+     slate on slate-05 panel ......... 7.23:1   13.6-17px,   400/700       PASS
+     slate on slate-15 (contents) .... 6.72:1   13.6px,      700           PASS
+     white on slate .................. 7.79:1   17-19px,     700           PASS
+     white on sea green .............. 4.05:1   19-26.6px,   700           PASS
+        Under 4.5:1, so it is used only at large-type sizes: buttons are
+        19px DM Sans Bold and the 'U' shape numeral is 26.6px, both over
+        the 18.66px bold threshold where 3:1 applies. This is the size
+        change the brand guidelines call for rather than shipping a
+        pairing that fails.
+
+   NON-TEXT (needs 3:1 where it identifies a control or its state)
+     sea green on white .............. 4.05:1   buttons, 'U' shape, chosen
+                                                option, progress fill      PASS
+     slate-70 on white ............... 3.65:1   option, card, input and
+                                                quiet-button borders       PASS
+     sunset red on white ............. 3.88:1   incorrect rule and cross   PASS
+     sea green on slate-15 track ..... 3.21:1   progress fill vs track     PASS
+     grass green on white ............ 2.56:1   correct rule and tick
+        Below 3:1, and deliberately so. The brand assigns grass green to
+        the correct state, and it cannot reach 3:1 on white without being
+        tinted, which the guidelines forbid. It is never the carrier of
+        meaning: every correct state also shows the word "Correct" and a
+        tick, and every incorrect state the word and a cross, so the
+        colour only reinforces information already given in text and
+        shape. Nothing is conveyed by colour alone anywhere in this build.
+     slate-15 progress track ......... 1.26:1   the unfilled remainder
+        Not a control boundary; the sea green fill is the indicator and it
+        clears 3:1 against both white and the track. The 15% track is the
+        brand's own suggested combination.
+
+   NOT USED, because the brand's accessibility chart forbids it at these
+   sizes: body-size text in or on sunset red; white on sunrise yellow;
+   white on suir blue.
+   ---------------------------------------------------------------------
    ===================================================================== */
 
 /* ---------- 1. Brand tokens (§9.1 — do not change without checking the

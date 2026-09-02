@@ -226,8 +226,9 @@ Text is left-aligned everywhere. The guidelines are explicit that justified
 type compromises accessibility, so please do not justify anything.
 
 If you change a colour, a size or a pairing, the contrast has to be re-checked.
-The measured figures for the version shipped here are in the build report that
-came with this folder.
+The measured figures for every pair shipped here are written into the comment at
+the top of `styles.css`, under **Measured contrast**, with the reasoning for the
+two that sit below the usual threshold.
 
 ---
 
