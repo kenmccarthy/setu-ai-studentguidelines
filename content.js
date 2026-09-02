@@ -753,6 +753,7 @@ const COURSE = {
           fields: {
             toolsLabel: "Tool or tools you used",
             toolsPlaceholder: "For example: ChatGPT (GPT-4o)",
+            toolsEmpty: "[tool name and version]",
             addToolLabel: "Add another tool",
             removeToolLabel: "Remove this tool",
             builtInLabel: "Including AI features built into software I was already using",
@@ -786,8 +787,8 @@ const COURSE = {
             { id: "other", text: "something else" }
           ],
           formats: [
-            { id: "reference", label: "Reference style", hint: "Matches the citation format in the SETU guidelines. Put it in your reference list." },
-            { id: "paragraph", label: "Short declaration", hint: "A sentence or two for the start or end of your submission." }
+            { id: "paragraph", label: "Short declaration", hint: "A sentence or two for the start or end of your submission." },
+            { id: "reference", label: "Reference style", hint: "Matches the citation format in the SETU guidelines. Put it in your reference list." }
           ],
           sample: {
             tool: "ChatGPT (GPT-4o)",
@@ -1175,7 +1176,14 @@ const COURSE = {
     passedLabel: "You have completed the course.",
     failedLabel: "Not quite. Read the feedback under each question, then try again — there is no limit on attempts and nothing is recorded.",
     retryFinalLabel: "Try the final check again",
-    savedLabel: "Saved on this device",
+    savedLabel: "Saved on this device.",
+    notSavedLabel: "This browser is not saving anything, so this will not be here when you come back.",
+    declarationHeading: "Declaration of generative AI use",
+    declName: "Name",
+    declModule: "Module",
+    declAssignment: "Assignment",
+    promptUsedLabel: "Example prompt used:",
+    builtInReferenceNote: "This work also used AI features built into software I was already using.",
     correctLabel: "Correct",
     incorrectLabel: "Not correct",
     partialLabel: "Partly correct"

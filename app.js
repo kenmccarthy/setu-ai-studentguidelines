@@ -857,6 +857,330 @@
     return section;
   };
 
+  /* ------------------------------------------------------------------
+     Declaration builder (§6.4)
+
+     Produces copy-and-paste declaration text in two switchable styles.
+     The text is always visible in a textarea, so copying is never the
+     only route out. Nothing typed here leaves the browser.
+     ------------------------------------------------------------------ */
+
+  function joinList(items) {
+    var kept = items.filter(function (t) { return t; });
+    if (!kept.length) { return ""; }
+    if (kept.length === 1) { return kept[0]; }
+    /* Several of the purposes in content.js already contain "and"
+       ("editing and proofreading"), and a second "and" reads badly, so
+       those lists stay comma-separated. */
+    var hasAnd = kept.some(function (t) { return / and /.test(t); });
+    if (hasAnd) { return kept.join(", "); }
+    return kept.slice(0, -1).join(", ") + " and " + kept[kept.length - 1];
+  }
+
+  function builderState(block) {
+    if (!state.builders[block.id]) {
+      state.builders[block.id] = {
+        tools: [""],
+        builtIn: false,
+        dates: "",
+        year: "",
+        purposes: {},
+        otherPurpose: "",
+        name: "",
+        moduleCode: "",
+        assignment: "",
+        prompt: "",
+        format: block.formats[0].id
+      };
+    }
+    return state.builders[block.id];
+  }
+
+  function declarationText(block, data) {
+    var f = block.fields;
+    var tools = data.tools.filter(function (t) { return t.trim(); });
+    var toolList = tools.length ? tools : [f.toolsEmpty];
+    var dates = data.dates.trim() || "[date or dates of use]";
+    var year = data.year.trim() || "[year]";
+    var name = data.name.trim() || "[your name]";
+
+    var purposes = block.purposes
+      .filter(function (p) { return data.purposes[p.id] && p.id !== "other"; })
+      .map(function (p) { return p.text; });
+    if (data.purposes.other && data.otherPurpose.trim()) { purposes.push(data.otherPurpose.trim()); }
+    var purposeText = purposes.length ? joinList(purposes) : "[what you used it for]";
+
+    if (data.format === "reference") {
+      /* [Tool name and version]. [Year]. Response to [Name], [date]. */
+      var lines = toolList.map(function (tool) {
+        return tool + ". " + year + ". Response to " + name + ", " + dates + ".";
+      });
+      if (data.builtIn) { lines.push(COURSE.ui.builtInReferenceNote); }
+      return lines.join("\n");
+    }
+
+    var head = [];
+    if (data.name.trim()) { head.push(COURSE.ui.declName + ": " + data.name.trim()); }
+    if (data.moduleCode.trim()) { head.push(COURSE.ui.declModule + ": " + data.moduleCode.trim()); }
+    if (data.assignment.trim()) { head.push(COURSE.ui.declAssignment + ": " + data.assignment.trim()); }
+
+    var what = data.assignment.trim() ? "my work on " + data.assignment.trim() : "this submission";
+    var sentence = "I used " + joinList(toolList) + " on " + dates + " for " + purposeText +
+      (data.builtIn ? ", including AI features built into software I was already using" : "") + ". " +
+      "The output and suggestions informed " + what +
+      ", and all final wording and analysis are my own.";
+
+    var body = [COURSE.ui.declarationHeading];
+    if (head.length) { body.push(head.join("\n")); }
+    body.push(sentence);
+    if (data.prompt.trim()) {
+      body.push(COURSE.ui.promptUsedLabel + "\n\"" + data.prompt.trim() + "\"");
+    }
+    return body.join("\n\n");
+  }
+
+  function textField(labelText, value, placeholder, onChange, type) {
+    var wrap = el("div", "field");
+    var input = document.createElement(type === "textarea" ? "textarea" : "input");
+    input.className = type === "textarea" ? "field__textarea" : "field__input";
+    if (type !== "textarea") { input.type = "text"; }
+    input.value = value || "";
+    if (placeholder) { input.placeholder = placeholder; }
+    var id = "f-" + Math.random().toString(36).slice(2, 9);
+    input.id = id;
+    var label = el("label", "field__label", labelText);
+    label.setAttribute("for", id);
+    wrap.appendChild(label);
+    wrap.appendChild(input);
+    input.addEventListener("input", function () { onChange(input.value); });
+    return { wrap: wrap, input: input };
+  }
+
+  renderers.builder = function (block) {
+    var data = builderState(block);
+    var f = block.fields;
+
+    var section = el("section", "block builder");
+    section.setAttribute("aria-labelledby", "builder-" + block.id + "-title");
+    var title = el("h3", "check__title", block.title);
+    title.id = "builder-" + block.id + "-title";
+    section.appendChild(title);
+    if (block.intro) { section.appendChild(richInto(el("p"), block.intro)); }
+
+    var output, status;
+
+    function refresh() {
+      save();
+      if (output) { output.value = declarationText(block, data); }
+    }
+
+    /* --- tools, repeatable --- */
+    var toolsWrap = el("div", "field");
+    toolsWrap.appendChild(el("p", "field__label", f.toolsLabel));
+    var toolRows = el("div");
+    toolsWrap.appendChild(toolRows);
+
+    function drawTools() {
+      clear(toolRows);
+      data.tools.forEach(function (value, i) {
+        var row = el("div", "tool-row");
+        var input = document.createElement("input");
+        input.type = "text";
+        input.className = "field__input";
+        input.value = value;
+        input.placeholder = f.toolsPlaceholder;
+        input.setAttribute("aria-label", f.toolsLabel + " " + (i + 1));
+        input.addEventListener("input", function () { data.tools[i] = input.value; refresh(); });
+        row.appendChild(input);
+        if (data.tools.length > 1) {
+          var remove = el("button", "btn btn--quiet", f.removeToolLabel);
+          remove.type = "button";
+          remove.addEventListener("click", function () {
+            data.tools.splice(i, 1);
+            refresh();
+            drawTools();
+            var first = toolRows.querySelector("input");
+            if (first) { first.focus(); }
+          });
+          row.appendChild(remove);
+        }
+        toolRows.appendChild(row);
+      });
+      var add = el("button", "btn btn--secondary", f.addToolLabel);
+      add.type = "button";
+      add.addEventListener("click", function () {
+        data.tools.push("");
+        refresh();
+        drawTools();
+        var inputs = toolRows.querySelectorAll("input");
+        if (inputs.length) { inputs[inputs.length - 1].focus(); }
+      });
+      toolRows.appendChild(add);
+    }
+    drawTools();
+    section.appendChild(toolsWrap);
+
+    /* --- built-in tools --- */
+    var builtInWrap = el("div", "field");
+    var builtInLabel = el("label", "checkline");
+    var builtInBox = document.createElement("input");
+    builtInBox.type = "checkbox";
+    builtInBox.checked = !!data.builtIn;
+    builtInBox.addEventListener("change", function () { data.builtIn = builtInBox.checked; refresh(); });
+    builtInLabel.appendChild(builtInBox);
+    builtInLabel.appendChild(document.createTextNode(f.builtInLabel));
+    builtInWrap.appendChild(builtInLabel);
+    section.appendChild(builtInWrap);
+
+    /* --- dates and year --- */
+    var dates = textField(f.datesLabel, data.dates, f.datesPlaceholder, function (v) { data.dates = v; refresh(); });
+    section.appendChild(dates.wrap);
+    var year = textField(f.yearLabel, data.year, "2026", function (v) { data.year = v; refresh(); });
+    section.appendChild(year.wrap);
+
+    /* --- purposes --- */
+    var purposesGroup = el("fieldset", "field question");
+    purposesGroup.appendChild(el("legend", "field__label", f.purposesLabel));
+    var purposeList = el("ul", "checks");
+    block.purposes.forEach(function (purpose) {
+      var li = el("li");
+      var line = el("label", "checkline");
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = !!data.purposes[purpose.id];
+      box.addEventListener("change", function () {
+        data.purposes[purpose.id] = box.checked;
+        refresh();
+        otherWrap.hidden = !data.purposes.other;
+      });
+      line.appendChild(box);
+      line.appendChild(document.createTextNode(purpose.text));
+      li.appendChild(line);
+      purposeList.appendChild(li);
+    });
+    purposesGroup.appendChild(purposeList);
+    var other = textField(f.purposesOtherLabel, data.otherPurpose, "", function (v) { data.otherPurpose = v; refresh(); });
+    var otherWrap = other.wrap;
+    otherWrap.hidden = !data.purposes.other;
+    purposesGroup.appendChild(otherWrap);
+    section.appendChild(purposesGroup);
+
+    /* --- identification --- */
+    section.appendChild(textField(f.nameLabel, data.name, f.namePlaceholder, function (v) { data.name = v; refresh(); }).wrap);
+    section.appendChild(textField(f.moduleLabel, data.moduleCode, f.modulePlaceholder, function (v) { data.moduleCode = v; refresh(); }).wrap);
+    section.appendChild(textField(f.assignmentLabel, data.assignment, f.assignmentPlaceholder, function (v) { data.assignment = v; refresh(); }).wrap);
+    section.appendChild(textField(f.promptLabel, data.prompt, f.promptPlaceholder, function (v) { data.prompt = v; refresh(); }, "textarea").wrap);
+
+    /* --- output style --- */
+    var formatGroup = el("fieldset", "field question");
+    formatGroup.appendChild(el("legend", "field__label", f.formatLabel));
+    var formatRow = el("div", "builder__formats");
+    block.formats.forEach(function (format) {
+      var line = el("label", "checkline");
+      var radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "format-" + block.id;
+      radio.value = format.id;
+      radio.checked = data.format === format.id;
+      radio.addEventListener("change", function () {
+        if (!radio.checked) { return; }
+        data.format = format.id;
+        refresh();
+        hint.textContent = format.hint;
+      });
+      line.appendChild(radio);
+      line.appendChild(document.createTextNode(format.label));
+      formatRow.appendChild(line);
+    });
+    formatGroup.appendChild(formatRow);
+    var chosen = block.formats.filter(function (x) { return x.id === data.format; })[0] || block.formats[0];
+    var hint = el("p", "builder__hint", chosen.hint);
+    formatGroup.appendChild(hint);
+    section.appendChild(formatGroup);
+
+    /* --- output --- */
+    var outWrap = el("div", "field");
+    var outLabel = el("label", "field__label", f.outputLabel);
+    outLabel.setAttribute("for", "builder-out-" + block.id);
+    output = document.createElement("textarea");
+    output.className = "field__textarea";
+    output.id = "builder-out-" + block.id;
+    output.rows = 8;
+    output.spellcheck = false;
+    output.readOnly = true;
+    output.value = declarationText(block, data);
+    outWrap.appendChild(outLabel);
+    outWrap.appendChild(output);
+    section.appendChild(outWrap);
+
+    var row = el("div", "btn-row");
+    var copy = el("button", "btn", f.copyLabel);
+    copy.type = "button";
+    copy.addEventListener("click", function () {
+      var text = output.value;
+      function fallback() {
+        try {
+          output.readOnly = false;
+          output.focus();
+          output.setSelectionRange(0, text.length);
+          var ok = document.execCommand && document.execCommand("copy");
+          output.readOnly = true;
+          status.textContent = ok ? f.copiedLabel : f.copyFailedLabel;
+        } catch (e) {
+          output.readOnly = true;
+          status.textContent = f.copyFailedLabel;
+        }
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () {
+          status.textContent = f.copiedLabel;
+        }, fallback);
+      } else {
+        fallback();
+      }
+    });
+    row.appendChild(copy);
+    section.appendChild(row);
+
+    status = el("p", "builder__status");
+    status.setAttribute("aria-live", "polite");
+    section.appendChild(status);
+
+    section.appendChild(richInto(el("p", "builder__note"), block.note));
+    return section;
+  };
+
+  /* ------------------------------------------------------------------
+     Reflection (§6.5)
+
+     Free text, saved locally, surfaced in the completion record. Not
+     submitted and not marked, and the label says so.
+     ------------------------------------------------------------------ */
+  renderers.reflect = function (block) {
+    var section = el("section", "block reflect");
+    section.setAttribute("aria-labelledby", "reflect-" + block.id + "-title");
+    var title = el("h3", "check__title", block.title);
+    title.id = "reflect-" + block.id + "-title";
+    section.appendChild(title);
+    section.appendChild(richInto(el("p", "reflect__note"), block.note));
+
+    var status = el("p", "reflect__status");
+    status.setAttribute("aria-live", "polite");
+
+    block.prompts.forEach(function (prompt) {
+      var key = block.id + "/" + prompt.id;
+      var field = textField(prompt.label, state.reflections[key] || "", prompt.placeholder, function (value) {
+        state.reflections[key] = value;
+        save();
+        status.textContent = store.available ? COURSE.ui.savedLabel : COURSE.ui.notSavedLabel;
+      }, "textarea");
+      section.appendChild(field.wrap);
+    });
+
+    section.appendChild(status);
+    return section;
+  };
+
   /* --- INTERACTIONS --- */
 
   function renderBlock(block, module) {
