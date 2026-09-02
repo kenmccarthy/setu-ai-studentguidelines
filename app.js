@@ -503,6 +503,360 @@
      the final check can call it before that section is reached. */
   var renderRecord = function () {};
 
+  /* ------------------------------------------------------------------
+     Card sort (§6.2) — "Is this allowed?"
+
+     Click-to-place, never drag-only. Select a card and choose a column,
+     or move between cards with the arrow keys and place the focused card
+     with 1, 2 or 3. Pointer users get the same two steps. There is no
+     drag path in v1: the spec allows one to be layered on top later, and
+     a half-built one would be worse than none.
+     ------------------------------------------------------------------ */
+
+  function sortState(id) {
+    if (!state.sorts[id]) { state.sorts[id] = { checked: false, placed: {} }; }
+    return state.sorts[id];
+  }
+
+  renderers.sort = function (block) {
+    var saved = sortState(block.id);
+    var selected = null;
+
+    var section = el("section", "block sort");
+    section.setAttribute("aria-labelledby", "sort-" + block.id + "-title");
+    var title = el("h3", "check__title", block.title);
+    title.id = "sort-" + block.id + "-title";
+    section.appendChild(title);
+    if (block.intro) { section.appendChild(richInto(el("p", "sort__intro"), block.intro)); }
+
+    var status = el("p", "sort__status");
+    status.setAttribute("aria-live", "polite");
+    section.appendChild(status);
+
+    var poolHeading = el("h4", "sort__pool-heading", COURSE.ui.unplacedLabel);
+    section.appendChild(poolHeading);
+    var pool = el("ul", "sort__pool");
+    pool.setAttribute("aria-labelledby", "sort-" + block.id + "-pool");
+    poolHeading.id = "sort-" + block.id + "-pool";
+    section.appendChild(pool);
+
+    var columns = el("div", "sort__columns");
+    section.appendChild(columns);
+
+    var summary = el("div", "sort__summary");
+    summary.setAttribute("aria-live", "polite");
+    summary.hidden = true;
+    section.appendChild(summary);
+
+    function cardById(id) {
+      return block.cards.filter(function (c) { return c.id === id; })[0];
+    }
+    function bucketById(id) {
+      return block.buckets.filter(function (b) { return b.id === id; })[0];
+    }
+    function unplaced() {
+      return block.cards.filter(function (c) { return !saved.placed[c.id]; });
+    }
+
+    function announce(message) { status.textContent = message; }
+
+    function place(cardId, bucketId) {
+      saved.placed[cardId] = bucketId;
+      selected = null;
+      save();
+      draw();
+      announce(COURSE.ui.placedAnnounce
+        .replace("{card}", cardById(cardId).text)
+        .replace("{bucket}", bucketById(bucketId).label));
+      focusFirstCard();
+    }
+
+    function unplace(cardId) {
+      delete saved.placed[cardId];
+      save();
+      draw();
+      announce(COURSE.ui.returnedAnnounce.replace("{card}", cardById(cardId).text));
+      focusFirstCard();
+    }
+
+    function focusFirstCard() {
+      var first = pool.querySelector(".card");
+      if (first) { first.focus(); }
+    }
+
+    function moveFocus(current, delta) {
+      var cards = Array.prototype.slice.call(pool.querySelectorAll(".card"));
+      var i = cards.indexOf(current);
+      if (i === -1) { return; }
+      var next = cards[(i + delta + cards.length) % cards.length];
+      if (next) { next.focus(); }
+    }
+
+    function drawPool() {
+      clear(pool);
+      var remaining = unplaced();
+
+      if (!remaining.length) {
+        var done = el("li");
+        done.appendChild(el("p", "bucket__empty",
+          saved.checked ? COURSE.ui.allCheckedLabel : COURSE.ui.allPlacedLabel));
+        pool.appendChild(done);
+        poolHeading.textContent = COURSE.ui.unplacedLabel + " (0)";
+        return;
+      }
+      poolHeading.textContent = COURSE.ui.unplacedLabel + " (" + remaining.length + ")";
+
+      remaining.forEach(function (card) {
+        var li = el("li");
+
+        if (saved.checked) {
+          /* After checking, an unplaced card still shows its explanation
+             and where it belonged. Every card explains itself (§6.2). */
+          var missed = el("div", "placed placed--wrong");
+          var mark = el("div", "placed__mark");
+          var glyph = icon("cross");
+          glyph.setAttribute("class", "feedback__icon feedback__icon--incorrect");
+          mark.appendChild(glyph);
+          mark.appendChild(document.createTextNode(
+            COURSE.ui.notPlacedLabel.replace("{bucket}", bucketById(card.correctBucket).label)));
+          missed.appendChild(mark);
+          missed.appendChild(el("p", "placed__text", card.text));
+          missed.appendChild(richInto(el("p", "placed__explain"), card.explain));
+          li.appendChild(missed);
+          pool.appendChild(li);
+          return;
+        }
+
+        var button = el("button", "card");
+        button.type = "button";
+        button.setAttribute("aria-pressed", selected === card.id ? "true" : "false");
+        if (selected === card.id) {
+          button.appendChild(el("span", "card__selected", COURSE.ui.selectedLabel));
+        }
+        button.appendChild(document.createTextNode(card.text));
+
+        button.addEventListener("click", function () {
+          selected = (selected === card.id) ? null : card.id;
+          draw();
+          var again = pool.querySelector('.card[aria-pressed="true"]');
+          if (again) { again.focus(); } else { focusFirstCard(); }
+          announce(selected ? COURSE.ui.selectedAnnounce.replace("{card}", card.text) : COURSE.ui.deselectedAnnounce);
+        });
+
+        button.addEventListener("keydown", function (event) {
+          if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+            event.preventDefault(); moveFocus(button, 1);
+          } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+            event.preventDefault(); moveFocus(button, -1);
+          } else if (event.key === "1" || event.key === "2" || event.key === "3") {
+            var bucket = block.buckets[Number(event.key) - 1];
+            if (bucket) { event.preventDefault(); place(card.id, bucket.id); }
+          }
+        });
+
+        li.appendChild(button);
+        pool.appendChild(li);
+      });
+    }
+
+    function drawColumns() {
+      clear(columns);
+      block.buckets.forEach(function (bucket, index) {
+        var column = el("div", "bucket");
+        column.appendChild(el("h4", "bucket__title", (index + 1) + ". " + bucket.label));
+        column.appendChild(el("p", "bucket__hint", bucket.hint));
+
+        if (!saved.checked) {
+          var placeBtn = el("button", "btn btn--secondary bucket__place",
+            COURSE.ui.placeInLabel + " " + bucket.label);
+          placeBtn.type = "button";
+          placeBtn.addEventListener("click", function () {
+            if (!selected) { announce(COURSE.ui.selectFirstLabel); return; }
+            place(selected, bucket.id);
+          });
+          column.appendChild(placeBtn);
+        }
+
+        var list = el("ul", "bucket__list");
+        var mine = block.cards.filter(function (c) { return saved.placed[c.id] === bucket.id; });
+
+        if (!mine.length) {
+          column.appendChild(el("p", "bucket__empty", COURSE.ui.emptyBucketLabel));
+        }
+
+        mine.forEach(function (card) {
+          var li = el("li");
+          var right = card.correctBucket === bucket.id;
+          var item = el("div", "placed" + (saved.checked ? (right ? " placed--right" : " placed--wrong") : ""));
+
+          if (saved.checked) {
+            var mark = el("div", "placed__mark");
+            var glyph = icon(right ? "tick" : "cross");
+            glyph.setAttribute("class", "feedback__icon feedback__icon--" + (right ? "correct" : "incorrect"));
+            mark.appendChild(glyph);
+            mark.appendChild(document.createTextNode(right
+              ? COURSE.ui.correctLabel
+              : COURSE.ui.belongsInLabel.replace("{bucket}", bucketById(card.correctBucket).label)));
+            item.appendChild(mark);
+          }
+
+          item.appendChild(el("p", "placed__text", card.text));
+
+          if (saved.checked) {
+            item.appendChild(richInto(el("p", "placed__explain"), card.explain));
+          } else {
+            var back = el("button", "btn btn--quiet placed__remove", COURSE.ui.moveBackLabel);
+            back.type = "button";
+            back.addEventListener("click", function () { unplace(card.id); });
+            item.appendChild(back);
+          }
+
+          li.appendChild(item);
+          list.appendChild(li);
+        });
+
+        column.appendChild(list);
+        columns.appendChild(column);
+      });
+    }
+
+    function drawSummary() {
+      clear(summary);
+      summary.hidden = !saved.checked;
+      if (!saved.checked) { return; }
+      var right = block.cards.filter(function (c) {
+        return saved.placed[c.id] === c.correctBucket;
+      }).length;
+      summary.appendChild(el("p", "score__headline",
+        COURSE.ui.sortScoreLabel
+          .replace("{right}", String(right))
+          .replace("{total}", String(block.cards.length))));
+      summary.appendChild(richInto(el("p"), block.summary));
+    }
+
+    function draw() {
+      drawPool();
+      drawColumns();
+      drawSummary();
+      drawButtons();
+    }
+
+    var buttonRow = el("div", "btn-row");
+    section.appendChild(buttonRow);
+
+    function drawButtons() {
+      clear(buttonRow);
+      if (!saved.checked) {
+        var checkBtn = el("button", "btn", COURSE.ui.checkSortLabel);
+        checkBtn.type = "button";
+        checkBtn.addEventListener("click", function () {
+          saved.checked = true;
+          selected = null;
+          save();
+          draw();
+          summary.focus && summary.focus();
+        });
+        buttonRow.appendChild(checkBtn);
+      }
+      var resetBtn = el("button", "btn btn--secondary", COURSE.ui.resetSortLabel);
+      resetBtn.type = "button";
+      resetBtn.addEventListener("click", function () {
+        saved.checked = false;
+        saved.placed = {};
+        selected = null;
+        save();
+        draw();
+        announce(COURSE.ui.sortResetLabel);
+        focusFirstCard();
+      });
+      buttonRow.appendChild(resetBtn);
+    }
+
+    draw();
+    return section;
+  };
+
+  /* ------------------------------------------------------------------
+     Permission spectrum (§6.3)
+
+     A native range input, so the keyboard behaviour is the browser's.
+     aria-valuetext carries the stop label rather than the number, and
+     the panel that swaps sits in a polite live region.
+     ------------------------------------------------------------------ */
+  renderers.slider = function (block) {
+    var section = el("section", "block slider");
+    section.setAttribute("aria-labelledby", "slider-" + block.id + "-title");
+    var title = el("h3", "check__title", block.title);
+    title.id = "slider-" + block.id + "-title";
+    section.appendChild(title);
+    if (block.intro) { section.appendChild(richInto(el("p"), block.intro)); }
+
+    var index = Math.min(Math.max(parseInt(state.sliders[block.id], 10) || 0, 0), block.stops.length - 1);
+
+    var track = el("div", "slider__track");
+    var label = el("label", "field__label", COURSE.ui.spectrumLabel);
+    label.setAttribute("for", "slider-" + block.id);
+    track.appendChild(label);
+
+    var input = document.createElement("input");
+    input.type = "range";
+    input.className = "slider__input";
+    input.id = "slider-" + block.id;
+    input.min = "0";
+    input.max = String(block.stops.length - 1);
+    input.step = "1";
+    input.value = String(index);
+    track.appendChild(input);
+
+    var marks = el("ol", "slider__marks");
+    block.stops.forEach(function (stop) {
+      var mark = el("li", "slider__mark");
+      mark.appendChild(el("span", null, stop.label));
+      marks.appendChild(mark);
+    });
+    track.appendChild(marks);
+    section.appendChild(track);
+
+    var panel = el("div", "stop");
+    panel.setAttribute("aria-live", "polite");
+    section.appendChild(panel);
+
+    function drawStop() {
+      var stop = block.stops[index];
+      input.setAttribute("aria-valuetext", stop.label);
+
+      Array.prototype.slice.call(marks.children).forEach(function (mark, i) {
+        mark.classList.toggle("slider__mark--on", i === index);
+      });
+
+      clear(panel);
+      panel.appendChild(el("h4", "stop__title", (index + 1) + ". " + stop.label));
+      panel.appendChild(richInto(el("p", "stop__sub"), stop.sub));
+
+      panel.appendChild(el("p", "stop__label", COURSE.ui.mayLabel));
+      var list = el("ul");
+      stop.may.forEach(function (item) { list.appendChild(richInto(el("li"), item)); });
+      panel.appendChild(list);
+
+      panel.appendChild(el("p", "stop__label", COURSE.ui.declareLabel));
+      panel.appendChild(richInto(el("p"), stop.declare));
+
+      panel.appendChild(el("p", "stop__label", COURSE.ui.unsureLabel));
+      panel.appendChild(richInto(el("p"), stop.unsure));
+    }
+
+    input.addEventListener("input", function () {
+      index = Math.min(Math.max(parseInt(input.value, 10) || 0, 0), block.stops.length - 1);
+      state.sliders[block.id] = index;
+      save();
+      drawStop();
+    });
+
+    drawStop();
+    section.appendChild(richInto(el("p", "slider__closing"), block.closing));
+    return section;
+  };
+
   /* --- INTERACTIONS --- */
 
   function renderBlock(block, module) {

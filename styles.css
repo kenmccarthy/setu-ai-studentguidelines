@@ -556,3 +556,8 @@ main:focus { outline: none; }
 }
 .question__prompt { padding: 0; }
 .check__score { max-width: var(--measure); }
+
+/* ---------- 24. Sort: status, pool heading, unplaced state ---------- */
+.sort__status { font-size: var(--fs--1); min-height: 1.6em; margin: 0.5rem 0 1rem; }
+.sort__pool-heading { font-size: var(--fs-0); margin-bottom: 0.5rem; }
+.sort__summary[hidden] { display: none; }
