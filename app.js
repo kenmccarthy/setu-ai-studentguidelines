@@ -169,6 +169,13 @@
     return node;
   }
 
+  /* Fills {placeholders} in a template string from content.js. */
+  function fill(template, values) {
+    return String(template).replace(/\{(\w+)\}/g, function (whole, key) {
+      return Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : whole;
+    });
+  }
+
   function icon(name) {
     var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("viewBox", "0 0 20 20");
@@ -250,7 +257,7 @@
     var wrap = el("div", "block stub");
     var stub = block.stub || {};
     wrap.appendChild(document.createComment(" v2: " + (stub.v2 || block.type) + " "));
-    wrap.appendChild(el("p", "stub__flag", "Not in this preview"));
+    wrap.appendChild(el("p", "stub__flag", COURSE.ui.stubFlag));
     if (stub.heading) {
       wrap.appendChild(richInto(el("h3", "stub__heading"), stub.heading));
     }
@@ -903,20 +910,21 @@
     var f = block.fields;
     var tools = data.tools.filter(function (t) { return t.trim(); });
     var toolList = tools.length ? tools : [f.toolsEmpty];
-    var dates = data.dates.trim() || "[date or dates of use]";
-    var year = data.year.trim() || "[year]";
-    var name = data.name.trim() || "[your name]";
+    var t = block.templates;
+    var dates = data.dates.trim() || t.emptyDates;
+    var year = data.year.trim() || t.emptyYear;
+    var name = data.name.trim() || t.emptyName;
 
     var purposes = block.purposes
       .filter(function (p) { return data.purposes[p.id] && p.id !== "other"; })
       .map(function (p) { return p.text; });
     if (data.purposes.other && data.otherPurpose.trim()) { purposes.push(data.otherPurpose.trim()); }
-    var purposeText = purposes.length ? joinList(purposes) : "[what you used it for]";
+    var purposeText = purposes.length ? joinList(purposes) : t.emptyPurposes;
 
     if (data.format === "reference") {
       /* [Tool name and version]. [Year]. Response to [Name], [date]. */
       var lines = toolList.map(function (tool) {
-        return tool + ". " + year + ". Response to " + name + ", " + dates + ".";
+        return fill(t.reference, { tool: tool, year: year, name: name, dates: dates });
       });
       if (data.builtIn) { lines.push(COURSE.ui.builtInReferenceNote); }
       return lines.join("\n");
@@ -927,11 +935,16 @@
     if (data.moduleCode.trim()) { head.push(COURSE.ui.declModule + ": " + data.moduleCode.trim()); }
     if (data.assignment.trim()) { head.push(COURSE.ui.declAssignment + ": " + data.assignment.trim()); }
 
-    var what = data.assignment.trim() ? "my work on " + data.assignment.trim() : "this submission";
-    var sentence = "I used " + joinList(toolList) + " on " + dates + " for " + purposeText +
-      (data.builtIn ? ", including AI features built into software I was already using" : "") + ". " +
-      "The output and suggestions informed " + what +
-      ", and all final wording and analysis are my own.";
+    var what = data.assignment.trim()
+      ? fill(t.whatNamed, { assignment: data.assignment.trim() })
+      : t.whatUnnamed;
+    var sentence = fill(t.sentence, {
+      tools: joinList(toolList),
+      dates: dates,
+      purposes: purposeText,
+      builtIn: data.builtIn ? t.builtInClause : "",
+      what: what
+    });
 
     var body = [COURSE.ui.declarationHeading];
     if (head.length) { body.push(head.join("\n")); }
@@ -1250,7 +1263,7 @@
     /* Print-only masthead. [[CONFIRM: SETU logo asset for print at the
        20mm minimum; a labelled box stands in until it is supplied.]] */
     var printHead = el("div", "record__print-head");
-    var printLogo = el("div", "record__print-logo", "SETU master logo — asset to be supplied");
+    var printLogo = el("div", "record__print-logo", COURSE.ui.logoPrintPlaceholder);
     printHead.appendChild(printLogo);
     printHead.appendChild(el("p", null, COURSE.title));
     record.appendChild(printHead);
@@ -1300,8 +1313,9 @@
     list.appendChild(el("dd", null, formatToday(state.completedAt)));
 
     list.appendChild(el("dt", null, c.scoreLabel));
-    list.appendChild(el("dd", null,
-      state.finalScore.correct + " of " + state.finalScore.total + " correct"));
+    list.appendChild(el("dd", null, fill(COURSE.ui.recordScore, {
+      correct: state.finalScore.correct, total: state.finalScore.total
+    })));
 
     record.appendChild(list);
 
@@ -1375,9 +1389,13 @@
     head.appendChild(u);
 
     var headText = el("div", "module__headtext");
-    headText.appendChild(el("p", "module__eyebrow",
-      COURSE.ui.moduleLabel + " " + module.number + " of " + (COURSE.modules.length - 1) +
-      "  ·  " + module.minutes + " " + COURSE.ui.minutesLabel));
+    headText.appendChild(el("p", "module__eyebrow", fill(COURSE.ui.moduleEyebrow, {
+      label: COURSE.ui.moduleLabel,
+      number: module.number,
+      last: COURSE.modules[COURSE.modules.length - 1].number,
+      minutes: module.minutes,
+      min: COURSE.ui.minutesLabel
+    })));
     var title = el("h2", "module__title", module.title);
     title.id = "module-title";
     headText.appendChild(title);
@@ -1461,8 +1479,9 @@
       var status = state.completed[module.id]
         ? COURSE.ui.completeLabel
         : (index === state.current ? COURSE.ui.inProgressLabel : COURSE.ui.notStartedLabel);
-      link.appendChild(el("span", "contents__meta",
-        module.minutes + " " + COURSE.ui.minutesLabel + "  ·  " + status));
+      link.appendChild(el("span", "contents__meta", fill(COURSE.ui.contentsMeta, {
+        minutes: module.minutes, min: COURSE.ui.minutesLabel, status: status
+      })));
 
       item.appendChild(link);
       contentsList.appendChild(item);
@@ -1476,7 +1495,10 @@
 
     byId("site-progress").hidden = false;
     byId("progress-label").textContent = COURSE.ui.progressLabel;
-    byId("progress-count").textContent = done + " of " + total + " " + COURSE.ui.progressOf;
+    var countText = fill(COURSE.ui.progressCount, {
+      done: done, total: total, modules: COURSE.ui.progressOf
+    });
+    byId("progress-count").textContent = countText;
     byId("progress-fill").style.width = pct + "%";
 
     var track = byId("progress-fill").parentNode;
@@ -1484,7 +1506,7 @@
     track.setAttribute("aria-valuemin", "0");
     track.setAttribute("aria-valuemax", String(total));
     track.setAttribute("aria-valuenow", String(done));
-    track.setAttribute("aria-valuetext", done + " of " + total + " " + COURSE.ui.progressOf);
+    track.setAttribute("aria-valuetext", countText);
   }
 
   /* ------------------------------------------------------------------
@@ -1563,8 +1585,17 @@
      ------------------------------------------------------------------ */
   function renderChrome() {
     document.title = COURSE.title;
+    byId("skip-link").textContent = COURSE.ui.skipLink;
+    byId("course-org").textContent = COURSE.ui.orgName;
     byId("course-title").textContent = COURSE.title;
     byId("course-subtitle").textContent = COURSE.subtitle;
+
+    var logoBox = byId("logo-box");
+    logoBox.setAttribute("aria-label", COURSE.ui.logoPlaceholderAlt);
+    var logoLabel = byId("logo-label");
+    logoLabel.appendChild(document.createTextNode(COURSE.ui.logoPlaceholderLine1));
+    logoLabel.appendChild(document.createElement("br"));
+    logoLabel.appendChild(document.createTextNode(COURSE.ui.logoPlaceholderLine2));
     byId("contents-heading").textContent = COURSE.ui.contentsTitle;
 
     var toggle = byId("contents-toggle");

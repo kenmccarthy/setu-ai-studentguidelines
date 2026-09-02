@@ -796,6 +796,17 @@ const COURSE = {
             name: "your name",
             purpose: "understanding a concept"
           },
+          templates: {
+            reference: "{tool}. {year}. Response to {name}, {dates}.",
+            sentence: "I used {tools} on {dates} for {purposes}{builtIn}. The output and suggestions informed {what}, and all final wording and analysis are my own.",
+            builtInClause: ", including AI features built into software I was already using",
+            whatNamed: "my work on {assignment}",
+            whatUnnamed: "this submission",
+            emptyDates: "[date or dates of use]",
+            emptyYear: "[year]",
+            emptyName: "[your name]",
+            emptyPurposes: "[what you used it for]"
+          },
           note: "Your lecturer may require a specific declaration form, or a full log of every prompt you used. Check the brief — this builder gives you a sound default, not a substitute for what you were asked for. [[CONFIRM: whether SETU has a standard declaration form students should use instead of this builder output]]"
         },
         {
@@ -1126,6 +1137,13 @@ const COURSE = {
 
   /* Interface strings. Buttons say what happens (brand voice, §9.7). */
   ui: {
+    skipLink: "Skip to the course",
+    orgName: "South East Technological University",
+    logoPlaceholderLine1: "SETU master logo",
+    logoPlaceholderLine2: "asset to be supplied",
+    logoPlaceholderAlt: "Placeholder for the SETU master logo",
+    logoPrintPlaceholder: "SETU master logo — asset to be supplied",
+    stubFlag: "Not in this preview",
     contentsTitle: "Contents",
     contentsToggle: "Contents",
     progressLabel: "Course progress",
@@ -1185,6 +1203,10 @@ const COURSE = {
     declAssignment: "Assignment",
     promptUsedLabel: "Example prompt used:",
     builtInReferenceNote: "This work also used AI features built into software I was already using.",
+    moduleEyebrow: "{label} {number} of {last}  ·  {minutes} {min}",
+    progressCount: "{done} of {total} {modules}",
+    contentsMeta: "{minutes} {min}  ·  {status}",
+    recordScore: "{correct} of {total} correct",
     correctLabel: "Correct",
     incorrectLabel: "Not correct",
     partialLabel: "Partly correct"
